@@ -8,6 +8,7 @@
     <title>@yield('title', 'Dashboard') — ScoutAlumni</title>
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700" rel="stylesheet" />
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 
@@ -59,28 +60,44 @@
                     Tracking
                 </a>
 
-                {{-- Items below disabled for future phases --}}
-                <div class="pt-4 pb-2 px-3">
-                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Segera Hadir</p>
-                </div>
+                <a href="{{ route('audit.index') }}"
+                    class="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                          {{ request()->routeIs('audit.*') ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white' }}">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        Audit
+                    </div>
+                    @if(isset($needsAuditCount) && $needsAuditCount > 0)
+                        <span class="bg-yellow-500 text-gray-900 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            {{ $needsAuditCount }}
+                        </span>
+                    @endif
+                </a>
 
-                <span
-                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 cursor-not-allowed">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                    Audit
-                </span>
-
-                <span
-                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 cursor-not-allowed">
+                <a href="{{ route('export') }}"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                          {{ request()->routeIs('export') ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white' }}">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     Export
-                </span>
+                </a>
+
+                <a href="{{ route('settings.index') }}"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                          {{ request()->routeIs('settings.*') ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white' }}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Pengaturan
+                </a>
             </nav>
         </div>
 
@@ -100,15 +117,59 @@
 
                     <h1 class="text-lg font-semibold text-gray-900">@yield('page-title', 'Dashboard')</h1>
 
-                    {{-- User menu --}}
-                    <div class="flex items-center gap-3">
-                        <span class="text-sm text-gray-600 hidden sm:block">{{ Auth::user()->name }}</span>
-                        <form method="POST" action="{{ route('logout') }}">
-                            @csrf
-                            <button type="submit" class="text-sm text-gray-500 hover:text-red-600 transition-colors">
-                                Logout
+                    {{-- Notifications & User menu --}}
+                    <div class="flex items-center gap-4">
+                        {{-- Notification Bell --}}
+                        <div class="relative" x-data="{ open: false }">
+                            <button @click="open = !open" class="text-gray-400 hover:text-gray-600 relative p-1 focus:outline-none">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                </svg>
+                                @if (Auth::user()->unreadNotifications->count() > 0)
+                                    <span class="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>
+                                @endif
                             </button>
-                        </form>
+
+                            {{-- Dropdown --}}
+                            <div x-show="open" @click.away="open = false" 
+                                x-transition:enter="transition ease-out duration-100"
+                                x-transition:enter-start="transform opacity-0 scale-95"
+                                x-transition:enter-end="transform opacity-100 scale-100"
+                                class="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
+                                <div class="px-4 py-2 border-b border-gray-50 flex justify-between items-center">
+                                    <h3 class="text-xs font-bold text-gray-900 uppercase">Notifikasi</h3>
+                                    @if (Auth::user()->unreadNotifications->count() > 0)
+                                        <a href="#" class="text-[10px] text-blue-600 hover:underline">Tandai dibaca</a>
+                                    @endif
+                                </div>
+                                <div class="max-h-64 overflow-y-auto">
+                                    @forelse(Auth::user()->unreadNotifications as $notification)
+                                        <div class="px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
+                                            <p class="text-xs font-semibold text-gray-900">{{ $notification->data['title'] ?? 'Notifikasi' }}</p>
+                                            <p class="text-[11px] text-gray-600 mt-1">{{ $notification->data['message'] ?? '' }}</p>
+                                            <p class="text-[10px] text-gray-400 mt-1">{{ $notification->created_at->diffForHumans() }}</p>
+                                        </div>
+                                    @empty
+                                        <div class="px-4 py-8 text-center">
+                                            <p class="text-xs text-gray-400">Tidak ada notifikasi baru</p>
+                                        </div>
+                                    @endforelse
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="h-6 w-px bg-gray-200"></div>
+
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm text-gray-600 hidden sm:block">{{ Auth::user()->name }}</span>
+                            <form method="POST" action="{{ route('logout') }}">
+                                @csrf
+                                <button type="submit" class="text-sm text-gray-500 hover:text-red-600 transition-colors">
+                                    Logout
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </header>

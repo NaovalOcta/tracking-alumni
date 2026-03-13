@@ -24,11 +24,11 @@
             </div>
             <div class="flex items-center gap-3">
                 @include('components.status-badge', ['status' => $alumni->tracking_status])
-                <form method="POST" action="{{ route('tracking.single', $alumni->nim) }}">
+                <form id="retrack-form" method="POST" action="{{ route('tracking.single', $alumni->nim) }}" onsubmit="handleRetrack(event)">
                     @csrf
                     <button type="submit"
-                        class="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-                        🔄 Lacak Ulang
+                        class="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                        <span>🔄</span> Lacak Ulang
                     </button>
                 </form>
             </div>
@@ -172,3 +172,83 @@
         </div>
     </div>
 @endsection
+
+@push('scripts')
+    <script>
+        function handleRetrack(event) {
+            event.preventDefault();
+            const form = event.target;
+            const btn = form.querySelector('button');
+            const nim = '{{ $alumni->nim }}';
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="inline-block animate-spin">⏳</span> Memproses...`;
+
+            const formData = new FormData(form);
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                startPolling(nim);
+            })
+            .catch(error => {
+                form.submit(); // Fallback
+            });
+        }
+
+        function startPolling(nim) {
+            let container = document.getElementById('tracking-progress-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'tracking-progress-container';
+                container.className = 'mb-6 bg-blue-50 border border-blue-100 rounded-xl p-5';
+                document.querySelector('main').prepend(container);
+            }
+
+            container.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center animate-pulse">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-bold text-blue-900" id="poll-message">Menghubungkan ke sistem pelacakan...</h4>
+                            <p class="text-[11px] text-blue-600">Proses ini memakan waktu sekitar 30-60 detik</p>
+                        </div>
+                    </div>
+                    <span class="text-sm font-black text-blue-600" id="poll-percent">0%</span>
+                </div>
+                <div class="w-full h-3 bg-blue-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)] transition-all duration-700 ease-out" id="poll-bar" style="width: 0%"></div>
+                </div>
+            `;
+
+            const interval = setInterval(() => {
+                fetch(`/tracking/${nim}/progress`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'not_found' || !data.progress) return;
+
+                        document.getElementById('poll-message').innerText = data.message;
+                        document.getElementById('poll-percent').innerText = data.progress + '%';
+                        document.getElementById('poll-bar').style.width = data.progress + '%';
+
+                        if (data.progress >= 100) {
+                            clearInterval(interval);
+                            setTimeout(() => {
+                                location.reload();
+                            }, 1500);
+                        }
+                    });
+            }, 1000);
+        }
+    </script>
+@endpush

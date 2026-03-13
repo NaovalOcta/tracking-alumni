@@ -7,7 +7,9 @@ use App\Models\EvidenceLog;
 use App\Models\SearchQuery;
 use App\Models\TrackingResult;
 use App\Models\TrackingHistory;
+use App\Events\TrackingProgressUpdated;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class TrackingService
 {
@@ -42,21 +44,33 @@ class TrackingService
         // Mark as in-progress
         $alumni->update(['tracking_status' => 'sedang_dilacak']);
 
-        // Step 1: Generate query variations
-        $queryVariations = $this->queryGenerator->generate($alumni);
+        // Step 1: Generate query variations (AI-powered strategy)
+        $this->updateProgress($alumni->nim, 10, 'Merumuskan strategi pencarian dengan Gemini AI...');
+        
+        try {
+            $strategy = $this->queryGenerator->generate($alumni);
+            $queries = $strategy['queries'] ?? [];
+            $contextKeywords = $strategy['context_keywords'] ?? [];
+            
+            Log::info("TrackingService: Generated " . count($queries) . " queries for {$alumni->nim}");
+        } catch (\Exception $e) {
+            Log::error("TrackingService: Strategy generation failed for {$alumni->nim}: " . $e->getMessage());
+            $queries = [];
+            $contextKeywords = [];
+        }
 
-        if (empty($queryVariations)) {
+        if (empty($queries)) {
+            Log::warning("TrackingService: No queries generated for {$alumni->nim}. Aborting.");
             $alumni->update(['tracking_status' => 'insufficient_data']);
-            return ['status' => 'insufficient_data', 'message' => 'Tidak cukup data untuk membuat query pencarian.'];
+            return ['status' => 'insufficient_data', 'message' => 'Gagal merumuskan strategi pencarian.'];
         }
 
         // Step 2: Execute searches with early-stop logic
         $allEvidence = [];
         $tier1Evidence = 0;
-        $currentTier = null;
         $skippedTiers = false;
 
-        foreach ($queryVariations as $queryInfo) {
+        foreach ($queries as $queryInfo) {
             // Early-stop: if we already have enough LinkedIn evidence, skip non-LinkedIn tiers
             if ($tier1Evidence >= $this->earlyStopThreshold && $queryInfo['tier'] !== 'tier1_linkedin') {
                 if (!$skippedTiers) {
@@ -66,6 +80,9 @@ class TrackingService
                 continue;
             }
 
+            $tierLabel = str_contains($queryInfo['tier'], 'linkedin') ? 'LinkedIn' : (str_contains($queryInfo['tier'], 'scholar') ? 'Scholar/Github' : 'General Web');
+            $this->updateProgress($alumni->nim, 30, "Menggali data dari {$tierLabel}...");
+            
             $searchResults = $this->serperSearch->search($queryInfo['query'], 3);
 
             // Log the search query
@@ -86,8 +103,14 @@ class TrackingService
                 ];
 
                 // Track tier 1 evidence count for early-stop
+                // Only increment if the snippet contains contextual keywords from Gemini
                 if ($queryInfo['tier'] === 'tier1_linkedin') {
-                    $tier1Evidence++;
+                    if ($this->containsContextualKeywords($item['snippet'] . ' ' . $item['title'], $contextKeywords)) {
+                        $tier1Evidence++;
+                        Log::info("TrackingService: AI-Contextual LinkedIn match found for {$alumni->nim}: {$item['link']}");
+                    } else {
+                        Log::info("TrackingService: LinkedIn result found but missing AI context for {$alumni->nim}: {$item['link']}");
+                    }
                 }
             }
 
@@ -123,7 +146,11 @@ class TrackingService
             'tahun_lulus'   => $alumni->tahun_lulus,
         ];
 
+        $this->updateProgress($alumni->nim, 80, 'Mengekstrak informasi sekunder...');
+
         $analysis = $this->geminiAnalysis->analyze($allEvidence, $alumniData);
+        
+        $this->updateProgress($alumni->nim, 95, 'Menganalisis akurasi dengan Gemini AI...');
         $confidence = $analysis['confidence'];
 
         // Step 4: Determine tracking status based on thresholds
@@ -139,7 +166,7 @@ class TrackingService
         }
 
         // Step 5: Save tracking result
-        TrackingResult::updateOrCreate(
+        $result = TrackingResult::updateOrCreate(
             ['alumni_nim' => $alumni->nim],
             [
                 'jabatan'          => $analysis['jabatan'],
@@ -152,6 +179,7 @@ class TrackingService
                 'source_type'      => 'serper_gemini',
             ]
         );
+        $result->touch(); // Force updated_at for sorting consistency
 
         // Step 6: Save tracking history snapshot
         TrackingHistory::create([
@@ -166,6 +194,8 @@ class TrackingService
             'tracking_status' => $newStatus,
             'last_tracked_at' => now(),
         ]);
+
+        $this->updateProgress($alumni->nim, 100, "Selesai! Status: {$newStatus}");
 
         Log::info("TrackingService: Completed {$alumni->nim} — status: {$newStatus}, confidence: {$confidence}");
 
@@ -212,5 +242,41 @@ class TrackingService
             'tier3_news_web'       => 'website',
             default                => 'other',
         };
+    }
+
+    /**
+     * Check if a snippet/title contains contextual keywords related to the alumni.
+     * Keywords are dynamically generated by Gemini AI.
+     */
+    private function containsContextualKeywords(string $text, array $keywords): bool
+    {
+        $text = strtolower($text);
+        
+        foreach ($keywords as $keyword) {
+            $keyword = strtolower(trim($keyword));
+            if ($keyword && str_contains($text, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Update tracking progress in both Cache (for polling) and Events (for broadcasting).
+     */
+    protected function updateProgress(string $nim, int $progress, string $message): void
+    {
+        $data = [
+            'progress' => $progress,
+            'message'  => $message,
+            'updated_at' => now()->toDateTimeString(),
+        ];
+
+        // Store in cache for 10 minutes
+        Cache::put("tracking_progress_{$nim}", $data, 600);
+
+        // Dispatch broadcast event
+        TrackingProgressUpdated::dispatch($nim, $progress, $message);
     }
 }

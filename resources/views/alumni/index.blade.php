@@ -9,13 +9,59 @@
         <div>
             <p class="text-sm text-gray-500">Kelola data alumni yang akan dilacak</p>
         </div>
-        <a href="{{ route('alumni.create') }}"
-            class="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            Tambah Alumni
-        </a>
+        <div class="flex items-center gap-2">
+            <a href="{{ route('export', request()->all()) }}"
+                class="inline-flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M16 9l-4 4m0 0l-4-4m4 4V3" />
+                </svg>
+                Export CSV
+            </a>
+            
+            <button type="button" onclick="document.getElementById('import-modal').classList.remove('hidden')"
+                class="inline-flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Import
+            </button>
+
+            <a href="{{ route('alumni.create') }}"
+                class="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Tambah Alumni
+            </a>
+        </div>
+    </div>
+
+    {{-- Import Modal --}}
+    <div id="import-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6 mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Import Alumni (CSV)</h3>
+                <button onclick="document.getElementById('import-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">&times;</button>
+            </div>
+            <form action="{{ route('alumni.import') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
+                @csrf
+                <div class="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer" 
+                    onclick="document.getElementById('csv-file').click()">
+                    <input type="file" name="file" id="csv-file" class="hidden" onchange="updateFileName(this)">
+                    <p id="file-name" class="text-sm text-gray-500">Klik untuk memilih file CSV</p>
+                    <p class="text-[10px] text-gray-400 mt-1">Format: NIM, Nama, Prodi, Tahun Lulus</p>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="document.getElementById('import-modal').classList.add('hidden')"
+                        class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                        Batal
+                    </button>
+                    <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        Mulai Import
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     {{-- Filters --}}
@@ -54,12 +100,18 @@
                         {{ $tahun }}</option>
                 @endforeach
             </select>
+            <select name="per_page"
+                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+                <option value="15" {{ request('per_page') == '15' ? 'selected' : '' }}>15 per hal</option>
+                <option value="50" {{ request('per_page') == '50' ? 'selected' : '' }}>50 per hal</option>
+                <option value="100" {{ request('per_page') == '100' ? 'selected' : '' }}>100 per hal</option>
+            </select>
             <div class="flex gap-2">
                 <button type="submit"
                     class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors">
                     Filter
                 </button>
-                @if (request()->hasAny(['search', 'status', 'prodi', 'tahun_lulus']))
+                @if (request()->hasAny(['search', 'status', 'prodi', 'tahun_lulus', 'per_page']))
                     <a href="{{ route('alumni.index') }}"
                         class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
                         Reset
@@ -75,17 +127,47 @@
             <table class="w-full text-sm">
                 <thead>
                     <tr class="border-b border-gray-200 bg-gray-50">
-                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">NIM</th>
-                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama
-                            Lengkap</th>
-                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prodi
+                        @php
+                            $sort = request('sort', 'nama_lengkap');
+                            $dir = request('direction', 'asc');
+                            $nextDir = $dir === 'asc' ? 'desc' : 'asc';
+                            
+                            function sortLink($column, $currentSort, $currentDir, $nextDir) {
+                                return route('alumni.index', array_merge(request()->query(), [
+                                    'sort' => $column,
+                                    'direction' => $column === $currentSort ? $nextDir : 'asc'
+                                ]));
+                            }
+                            
+                            function sortIcon($column, $currentSort, $currentDir) {
+                                if ($column !== $currentSort) return '<svg class="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path></svg>';
+                                return $currentDir === 'asc' 
+                                    ? '<svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>'
+                                    : '<svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path></svg>';
+                            }
+                        @endphp
+                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <a href="{{ sortLink('nim', $sort, $dir, $nextDir) }}" class="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                NIM {!! sortIcon('nim', $sort, $dir) !!}
+                            </a>
                         </th>
-                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tahun
-                            Lulus</th>
-                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status
+                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <a href="{{ sortLink('nama_lengkap', $sort, $dir, $nextDir) }}" class="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                Nama Lengkap {!! sortIcon('nama_lengkap', $sort, $dir) !!}
+                            </a>
                         </th>
-                        <th class="px-5 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi
+                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prodi</th>
+                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <a href="{{ sortLink('tahun_lulus', $sort, $dir, $nextDir) }}" class="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                Thn Lulus {!! sortIcon('tahun_lulus', $sort, $dir) !!}
+                            </a>
                         </th>
+                        <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <a href="{{ sortLink('tracking_status', $sort, $dir, $nextDir) }}" class="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                Status {!! sortIcon('tracking_status', $sort, $dir) !!}
+                            </a>
+                        </th>
+                        <th class="px-5 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -164,3 +246,12 @@
         @endif
     </div>
 @endsection
+
+@push('scripts')
+<script>
+    function updateFileName(input) {
+        const fileName = input.files[0] ? input.files[0].name : 'Klik untuk memilih file CSV';
+        document.getElementById('file-name').innerText = fileName;
+    }
+</script>
+@endpush

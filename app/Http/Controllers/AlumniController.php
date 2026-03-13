@@ -33,7 +33,20 @@ class AlumniController extends Controller
             $query->where('tahun_lulus', $request->tahun_lulus);
         }
 
-        $alumni = $query->orderBy('nama_lengkap')->paginate(15)->withQueryString();
+        // Sorting
+        $sort = $request->input('sort', 'nama_lengkap');
+        $direction = $request->input('direction', 'asc');
+        
+        $allowedSorts = ['nama_lengkap', 'nim', 'last_tracked_at', 'tahun_lulus', 'tracking_status'];
+        if (in_array($sort, $allowedSorts)) {
+            $query->orderBy($sort, $direction === 'desc' ? 'desc' : 'asc');
+        } else {
+            $query->orderBy('nama_lengkap');
+        }
+
+        // Pagination
+        $perPage = $request->input('per_page', 15);
+        $alumni = $query->paginate($perPage)->withQueryString();
 
         // Get unique values for filter dropdowns
         $prodiList = Alumni::select('prodi')->distinct()->orderBy('prodi')->pluck('prodi');
@@ -116,5 +129,58 @@ class AlumniController extends Controller
 
         return redirect()->route('alumni.index')
             ->with('success', 'Data alumni berhasil dihapus.');
+    }
+
+    /**
+     * Import alumni from CSV.
+     */
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|mimes:csv,txt|max:2048',
+        ]);
+
+        $file = $request->file('file');
+        $handle = fopen($file->getRealPath(), 'r');
+        
+        // Skip BOM if present
+        $header = fgetcsv($handle);
+        if ($header && str_contains($header[0], "\xEF\xBB\xBF")) {
+            $header[0] = str_replace("\xEF\xBB\xBF", '', $header[0]);
+        }
+
+        $count = 0;
+        $errors = 0;
+
+        while (($row = fgetcsv($handle)) !== false) {
+            try {
+                // simple mapping based on header names or index
+                // expected header: NIM, Nama, Prodi, Tahun Lulus
+                $nim = $row[0] ?? null;
+                $name = $row[1] ?? null;
+                $prodi = $row[2] ?? null;
+                $year = $row[3] ?? null;
+
+                if ($nim && $name) {
+                    Alumni::updateOrCreate(
+                        ['nim' => $nim],
+                        [
+                            'nama_lengkap' => $name,
+                            'prodi' => $prodi ?? 'Lainnya',
+                            'tahun_lulus' => $year ?? date('Y'),
+                            'tracking_status' => 'belum_dilacak'
+                        ]
+                    );
+                    $count++;
+                }
+            } catch (\Exception $e) {
+                $errors++;
+            }
+        }
+
+        fclose($handle);
+
+        return redirect()->route('alumni.index')
+            ->with('success', "Berhasil mengimpor {$count} alumni." . ($errors > 0 ? " ({$errors} baris gagal)" : ''));
     }
 }

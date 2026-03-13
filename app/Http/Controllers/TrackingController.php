@@ -7,6 +7,7 @@ use App\Models\TrackingResult;
 use App\Jobs\BatchTrackingJob;
 use App\Services\TrackingService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class TrackingController extends Controller
 {
@@ -26,16 +27,17 @@ class TrackingController extends Controller
             'not_found'       => Alumni::status('not_found')->count(),
         ];
 
-        // Recent tracking results
-        $recentResults = TrackingResult::with('alumni')
-            ->latest('updated_at')
+        // Recent tracking activity
+        $recentTracking = Alumni::with('latestTrackingResult')
+            ->whereNotNull('last_tracked_at')
+            ->orderByDesc('last_tracked_at')
             ->take(10)
             ->get();
 
         // All alumni for single tracking dropdown (can re-track any)
         $readyForTracking = Alumni::orderBy('nama_lengkap')->get();
 
-        return view('tracking.index', compact('apiStatus', 'stats', 'recentResults', 'readyForTracking'));
+        return view('tracking.index', compact('apiStatus', 'stats', 'recentTracking', 'readyForTracking'));
     }
 
     /**
@@ -45,7 +47,13 @@ class TrackingController extends Controller
     {
         $alumni = Alumni::findOrFail($nim);
 
-        // Run synchronously for immediate feedback
+        if ($request->ajax()) {
+            // Dispatch to queue and return immediately so UI can poll
+            \App\Jobs\ProcessAlumniTracking::dispatch($alumni->nim);
+            return response()->json(['status' => 'queued', 'message' => 'Tracking dimulai.']);
+        }
+
+        // Fallback for non-ajax
         $result = $trackingService->trackAlumni($alumni);
 
         return redirect()->route('tracking.index')
@@ -63,11 +71,25 @@ class TrackingController extends Controller
         $count = Alumni::status($status)->count();
 
         if ($count === 0) {
+            if ($request->ajax()) {
+                return response()->json(['error' => "Tidak ada alumni dengan status \"{$status}\" untuk dilacak."], 422);
+            }
             return redirect()->route('tracking.index')
                 ->with('error', "Tidak ada alumni dengan status \"{$status}\" untuk dilacak.");
         }
 
+        // Get the list of NIMs that will be processed
+        $alumniToProcess = Alumni::status($status)->limit($limit)->pluck('nim');
+
         BatchTrackingJob::dispatch($status, $limit);
+
+        if ($request->ajax()) {
+            return response()->json([
+                'status' => 'started', 
+                'message' => "Batch tracking dimulai untuk {$limit} alumni.",
+                'nims' => $alumniToProcess
+            ]);
+        }
 
         return redirect()->route('tracking.index')
             ->with('success', "Batch tracking dimulai untuk {$limit} alumni (status: {$status}). Tracking akan berjalan di background.");
@@ -87,5 +109,19 @@ class TrackingController extends Controller
         $histories = $alumni->trackingHistories->sortByDesc('created_at');
 
         return view('tracking.result', compact('alumni', 'latestResult', 'searchQueries', 'evidenceLogs', 'histories'));
+    }
+
+    /**
+     * Get real-time progress from cache.
+     */
+    public function getProgress(string $nim)
+    {
+        $progress = Cache::get("tracking_progress_{$nim}");
+
+        if (!$progress) {
+            return response()->json(['status' => 'not_found']);
+        }
+
+        return response()->json($progress);
     }
 }

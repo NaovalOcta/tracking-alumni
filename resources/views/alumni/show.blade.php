@@ -181,26 +181,52 @@
 
             {{-- Tracking History --}}
             <div class="bg-white rounded-xl border border-gray-200">
-                <div class="px-5 py-4 border-b border-gray-200">
+                <div class="px-5 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h3 class="text-sm font-medium text-gray-900">Riwayat Perubahan</h3>
+                    <span class="text-xs text-gray-400">{{ $alumni->trackingHistories->count() }} Versi</span>
                 </div>
-                <div class="p-5">
+                <div class="p-0">
                     @if ($alumni->trackingHistories->isNotEmpty())
-                        <div class="space-y-3">
+                        <div class="divide-y divide-gray-100">
                             @foreach ($alumni->trackingHistories->sortByDesc('created_at') as $history)
-                                <div class="border border-gray-100 rounded-lg p-3">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <span
-                                            class="text-sm text-gray-700 font-medium">{{ $history->changed_reason ?? 'Update data' }}</span>
-                                        <span
-                                            class="text-xs text-gray-400">{{ $history->created_at ? $history->created_at->format('d M Y H:i') : '-' }}</span>
+                                <div class="p-5 hover:bg-gray-50 transition-colors">
+                                    <div class="flex items-start justify-between mb-3">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p class="text-sm font-bold text-gray-900">{{ $history->changed_reason ?? 'Pembaruan Data' }}</p>
+                                                <p class="text-xs text-gray-500">{{ $history->created_at ? $history->created_at->format('d M Y, H:i') : '-' }}</p>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <pre class="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{{ json_encode($history->snapshot_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                    
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 bg-gray-50 rounded-lg p-3 text-xs">
+                                        @foreach(['jabatan', 'instansi', 'lokasi', 'bidang_pekerjaan'] as $field)
+                                            @if(isset($history->snapshot_data[$field]))
+                                                <div>
+                                                    <span class="text-gray-400 capitalize block">{{ str_replace('_', ' ', $field) }}</span>
+                                                    <span class="text-gray-700 font-medium">{{ $history->snapshot_data[$field] ?: '-' }}</span>
+                                                </div>
+                                            @endif
+                                        @endforeach
+                                        @if(isset($history->snapshot_data['confidence']))
+                                            <div>
+                                                <span class="text-gray-400 block">Confidence</span>
+                                                <span class="text-blue-600 font-bold">{{ round($history->snapshot_data['confidence'] * 100) }}%</span>
+                                            </div>
+                                        @endif
+                                    </div>
                                 </div>
                             @endforeach
                         </div>
                     @else
-                        <p class="text-center text-gray-400 text-sm py-6">Belum ada riwayat perubahan.</p>
+                        <div class="p-5 text-center">
+                            <p class="text-gray-400 text-sm">Belum ada riwayat perubahan.</p>
+                        </div>
                     @endif
                 </div>
             </div>

@@ -62,7 +62,7 @@
             </div>
             <div class="p-5 space-y-4">
                 {{-- Batch Tracking --}}
-                <form method="POST" action="{{ route('tracking.batch') }}">
+                <form method="POST" action="{{ route('tracking.batch') }}" onsubmit="startBatchTracking(event)">
                     @csrf
                     <p class="text-sm text-gray-600 mb-3">Lacak alumni secara batch (berjalan di background via queue).</p>
                     <div class="space-y-3">
@@ -129,18 +129,19 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
-                        @forelse($recentResults as $result)
+                        @forelse($recentTracking as $alumni)
+                            @php $result = $alumni->latestTrackingResult; @endphp
                             <tr class="hover:bg-gray-50 transition-colors">
                                 <td class="px-5 py-3">
                                     <div>
-                                        <p class="font-medium text-gray-900">{{ $result->alumni->nama_lengkap ?? '-' }}</p>
-                                        <p class="text-xs text-gray-400 font-mono">{{ $result->alumni_nim }}</p>
+                                        <p class="font-medium text-gray-900">{{ $alumni->nama_lengkap }}</p>
+                                        <p class="text-xs text-gray-400 font-mono">{{ $alumni->nim }}</p>
                                     </div>
                                 </td>
-                                <td class="px-5 py-3 text-gray-600">{{ $result->jabatan ?? '-' }}</td>
-                                <td class="px-5 py-3 text-gray-600">{{ $result->instansi ?? '-' }}</td>
+                                <td class="px-5 py-3 text-gray-600">{{ $result?->jabatan ?? '-' }}</td>
+                                <td class="px-5 py-3 text-gray-600">{{ $result?->instansi ?? '-' }}</td>
                                 <td class="px-5 py-3">
-                                    @if ($result->confidence_score !== null)
+                                    @if ($result && $result->confidence_score !== null)
                                         @php
                                             $score = $result->confidence_score;
                                             $color = $score >= 0.8 ? 'green' : ($score >= 0.5 ? 'yellow' : 'red');
@@ -158,16 +159,14 @@
                                     @endif
                                 </td>
                                 <td class="px-5 py-3 text-right">
-                                    <a href="{{ route('tracking.result', $result->alumni_nim) }}"
-                                        class="text-blue-600 hover:text-blue-800 text-xs font-medium">
-                                        Detail →
-                                    </a>
+                                    <a href="{{ route('tracking.result', $alumni->nim) }}"
+                                        class="text-blue-600 hover:text-blue-800 font-medium">Detail</a>
                                 </td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="5" class="px-5 py-8 text-center text-gray-400 text-sm">
-                                    Belum ada hasil tracking. Mulai tracking di panel sebelah kiri.
+                                <td colspan="5" class="px-5 py-10 text-center text-gray-400">
+                                    Belum ada aktivitas pelacakan terbaru.
                                 </td>
                             </tr>
                         @endforelse
@@ -180,16 +179,177 @@
 
 @push('scripts')
     <script>
+        let activePolls = {};
+
         function submitSingleTracking() {
             const nim = document.getElementById('single-nim').value;
             if (!nim) {
                 alert('Pilih alumni terlebih dahulu.');
                 return;
             }
-            const form = document.getElementById('single-tracking-form');
-            form.action = '/tracking/' + nim;
-            form.method = 'POST';
-            form.submit();
+            
+            // Show loading state immediately
+            const btn = document.querySelector('#single-tracking-form button');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> Lacak Alumni...`;
+
+            // We'll use AJAX to start tracking so we can keep current page for progress
+            const formData = new FormData();
+            formData.append('_token', '{{ csrf_token() }}');
+
+            fetch(`/tracking/${nim}`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                startPolling(nim);
+            })
+            .catch(error => {
+                console.error('Error starting tracking:', error);
+                // Fallback to normal form submit if AJAX fails
+                const form = document.getElementById('single-tracking-form');
+                form.action = '/tracking/' + nim;
+                form.method = 'POST';
+                form.submit();
+            });
+        }
+
+        function startBatchTracking(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            const btn = form.querySelector('button[type="submit"]');
+            
+            btn.disabled = true;
+            btn.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> Memulai Batch...`;
+
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.nims && data.nims.length > 0) {
+                    showBatchProgressHeader(data.nims.length);
+                    data.nims.forEach(nim => {
+                        startPolling(nim, true);
+                    });
+                    btn.innerHTML = `🚀 Batch Berjalan (${data.nims.length})`;
+                } else {
+                    location.reload();
+                }
+            })
+            .catch(error => {
+                console.error('Batch error:', error);
+                form.submit();
+            });
+        }
+
+        function showBatchProgressHeader(total) {
+            let container = document.getElementById('batch-summary-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'batch-summary-container';
+                container.className = 'mb-6 bg-gray-900 text-white rounded-xl p-5 shadow-lg overflow-hidden relative';
+                document.querySelector('main').prepend(container);
+            }
+
+            container.innerHTML = `
+                <div class="relative z-10">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-sm font-bold flex items-center gap-2">
+                            <span class="flex h-2 w-2 rounded-full bg-green-500 animate-ping"></span>
+                            Batch Tracking Aktif
+                        </h4>
+                        <span class="text-xs font-mono text-gray-400" id="batch-count">0 / ${total} Selesai</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-gray-700 rounded-full">
+                        <div class="h-1.5 bg-blue-500 transition-all duration-500" id="batch-global-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="absolute top-0 right-0 p-2 opacity-10">
+                    <svg class="w-20 h-20" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14H11V21L20 10H13Z"/></svg>
+                </div>
+            `;
+            
+            window.batchTotal = total;
+            window.batchFinished = 0;
+        }
+
+        function startPolling(nim, isBatch = false) {
+            if (activePolls[nim]) return;
+
+            let container = document.getElementById('tracking-progress-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'tracking-progress-container';
+                container.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6';
+                const summary = document.getElementById('batch-summary-container');
+                if (summary) {
+                    summary.after(container);
+                } else {
+                    document.querySelector('main').prepend(container);
+                }
+            }
+
+            const card = document.createElement('div');
+            card.id = `poll-card-${nim}`;
+            card.className = 'bg-white border border-gray-100 rounded-xl p-4 shadow-sm';
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${nim}</span>
+                    <span class="text-xs font-black text-blue-600" id="poll-percent-${nim}">0%</span>
+                </div>
+                <p class="text-xs text-gray-600 mb-2 truncate" id="poll-message-${nim}">Inisialisasi...</p>
+                <div class="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-1.5 bg-blue-600 transition-all duration-500" id="poll-bar-${nim}" style="width: 0%"></div>
+                </div>
+            `;
+            container.prepend(card);
+
+            activePolls[nim] = setInterval(() => {
+                fetch(`/tracking/${nim}/progress`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'not_found' || !data.progress) return;
+
+                        const messageEl = document.getElementById(`poll-message-${nim}`);
+                        const percentEl = document.getElementById(`poll-percent-${nim}`);
+                        const barEl = document.getElementById(`poll-bar-${nim}`);
+
+                        if (messageEl) messageEl.innerText = data.message;
+                        if (percentEl) percentEl.innerText = data.progress + '%';
+                        if (barEl) barEl.style.width = data.progress + '%';
+
+                        if (data.progress >= 100) {
+                            clearInterval(activePolls[nim]);
+                            delete activePolls[nim];
+                            
+                            // Update global batch
+                            if (window.batchTotal) {
+                                window.batchFinished++;
+                                document.getElementById('batch-count').innerText = `${window.batchFinished} / ${window.batchTotal} Selesai`;
+                                document.getElementById('batch-global-bar').style.width = (window.batchFinished / window.batchTotal * 100) + '%';
+                                
+                                if (window.batchFinished >= window.batchTotal) {
+                                    setTimeout(() => location.reload(), 2000);
+                                }
+                            } else {
+                                setTimeout(() => location.reload(), 2000);
+                            }
+                        }
+                    });
+            }, 1000);
         }
     </script>
 @endpush
