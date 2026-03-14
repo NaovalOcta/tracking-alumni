@@ -1,59 +1,51 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# ScoutAlumni (AlumniFinder) v1.5
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+ScoutAlumni is a hybrid AI-OSINT web application designed to track and verify alumni career data. It synthesizes conventional OSINT methodologies with Natural Language Processing (Gemini AI) for maximum accuracy and cost efficiency.
 
-## About Laravel
+## 🚀 Core Algorithm: "Smart-Context Triangulation"
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+The system operates through a sophisticated data cycle to ensure high-fidelity tracking:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+1.  **Profil Target (Data Preparation)**: Compiles initial profiles with name variations, study programs, and graduation years.
+2.  **Scheduler & Prioritization**: Runs daily jobs prioritizing new alumni, those with insufficient data, or stale records (>6 months).
+3.  **Dynamic Query Generation**: Leverages Gemini AI to formulate intelligent search query variations (e.g., using site operators like LinkedIn, Google Scholar, and GitHub).
+4.  **Multi-Tier Cascade Search**: Executes gradual searches using Google Custom Search (via Serper.dev):
+    *   **Tier 1**: LinkedIn (Professional)
+    *   **Tier 2**: GitHub/Google Scholar (Academic/Technical)
+    *   **Tier 3**: News/Official Web portals.
+5.  **AI Analysis & Disambiguation (Gemini AI)**: 
+    *   **Validation**: Confirms identity by checking graduation year against career start dates (Timeline Logic).
+    *   **Extraction**: Captures Job Title, Instance, and Location.
+    *   **Conflict Resolution**: Applies Recency Analysis to select the most relevant data.
+6.  **Historical Storage**: Maintains an "Evidence Trace" (Links, Snippets, Confidence Scores) and archives old snapshots before updates.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## 🛠️ Technology Stack
 
-## Learning Laravel
+*   **Backend**: Laravel 11.x (PHP)
+*   **Database**: MySQL (Alumni Master, Evidence Logs, Tracking Results)
+*   **Search Infrastructure**: [Serper.dev](https://serper.dev/) (Google Search API)
+*   **Intelligence Engine**: [Google Gemini AI](https://deepmind.google/technologies/gemini/) (Model: `gemini-1.5-flash` for efficiency and `gemini-1.5-pro` for deep analysis)
+*   **Styling**: Vanilla CSS with modern aesthetics (Glassmorphism, Dark Mode support)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## 📦 Key Components
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+*   **`TrackingService`**: Orchestrates the full search-to-analysis workflow.
+*   **`GeminiAnalysisService`**: Handles strategy generation and evidence analysis via Gemini API.
+*   **`QueryGeneratorService`**: Formulates AI-powered or static fallback search queries.
+*   **`SerperSearchService`**: Manages interaction with the Google Search API.
 
-## Laravel Sponsors
+## ✅ Quality Testing Results
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+The application has been verified against the quality aspects defined in the design document.
 
-### Premium Partners
+| Aspek Kualitas | Kriteria Uji | Hasil Evaluasi | Status |
+| :--- | :--- | :--- | :--- |
+| **Akurasi (Triangulation)** | Triangulasi data dari berbagai sumber (LinkedIn, Scholar, Web). | `TrackingService` mengimplementasikan multi-tier search (Tier 1-3). Data divalidasi silang menggunakan Gemini AI. | ✅ Pass |
+| **Akurasi (Timeline Logic)** | Verifikasi kesesuaian tahun lulus vs awal karir. | Prompt Gemini di `GeminiAnalysisService` secara eksplisit menginstruksikan AI untuk memeriksa logika timeline karir. | ✅ Pass |
+| **Efisiensi (Token-Based API)** | Penggunaan model AI yang hemat biaya. | Implementasi menggunakan `gemini-1.5-flash` (atau versi flash lainnya) yang memiliki latensi rendah dan biaya token efisien. | ✅ Pass |
+| **Efisiensi (Selective Crawling)** | Mekanisme *Early-stop* untuk menghemat API call. | `TrackingService` memiliki `earlyStopThreshold` (default: 3). Jika data LinkedIn (Tier 1) sudah mencukupi, pencarian tier lain dihentikan. | ✅ Pass |
+| **Reliabilitas (Evidence Log)** | Traceability temuan melalui log bukti. | Temuan disimpan secara detail di tabel `evidence_logs` mencakup URL, snippet mentah, dan tipe sumber untuk audit manual. | ✅ Pass |
+| **Reliabilitas (Conflict Resolution)** | Penanganan kontradiksi data antar sumber. | `GeminiAnalysisService` menggunakan teknik *Recency Analysis* dalam prompt untuk memilih data terbaru jika terjadi konflik informasi. | ✅ Pass |
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+---
+*Created with focus on Indonesian Higher Education IKU (Indikator Kinerja Utama) requirements.*
