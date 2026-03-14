@@ -43,3 +43,46 @@ Route::middleware(['auth'])->group(function () {
     // Export
     Route::get('/export', [ExportController::class, 'export'])->name('export');
 });
+
+// Automation Trigger (External Cron)
+Route::get('/automation/run', function (\Illuminate\Http\Request $request) {
+    if (!$token = env('CRON_TOKEN')) {
+        return response()->json(['error' => 'CRON_TOKEN not configured'], 500);
+    }
+    
+    if ($request->query('token') !== $token) {
+        return response()->json(['error' => 'Unauthorized'], 401);
+    }
+
+    try {
+        // Prolong execution time for batch processing
+        set_time_limit(0);
+
+        // 1. Run scheduled tasks
+        \Illuminate\Support\Facades\Artisan::call('schedule:run');
+        $scheduleOutput = \Illuminate\Support\Facades\Artisan::output();
+
+        // 2. Process any pending jobs in the queue
+        \Illuminate\Support\Facades\Artisan::call('queue:work', [
+            '--stop-when-empty' => true,
+            '--tries' => 3
+        ]);
+        $queueOutput = \Illuminate\Support\Facades\Artisan::output();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Automation tasks executed.',
+            'details' => [
+                'schedule' => trim($scheduleOutput) ?: 'No tasks due.',
+                'queue' => trim($queueOutput) ?: 'Queue processed or empty.'
+            ]
+        ]);
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::error('External Cron Error: ' . $e->getMessage());
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+});
+

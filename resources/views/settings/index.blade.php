@@ -5,10 +5,10 @@
 
 @section('content')
     <div class="max-w-4xl mx-auto">
-        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50/50">
-                <h3 class="text-base font-semibold text-gray-900">Penjadwalan Otomatis (Automated Tracking)</h3>
-                <p class="text-xs text-gray-500 mt-0.5">Atur kapan sistem harus mulai melacak data alumni secara otomatis di latar belakang.</p>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white">Penjadwalan Otomatis (Automated Tracking)</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Atur kapan sistem harus mulai melacak data alumni secara otomatis di latar belakang.</p>
             </div>
             
             <form action="{{ route('settings.update') }}" method="POST" class="p-6 space-y-6">
@@ -17,29 +17,29 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {{-- Frequency --}}
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Frekuensi Pelacakan</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Frekuensi Pelacakan</label>
                         <select name="tracking_frequency" id="tracking_frequency" onchange="toggleFrequencyOptions()"
-                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                            class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
                             <option value="daily" {{ $config['tracking_frequency'] == 'daily' ? 'selected' : '' }}>Setiap Hari</option>
                             <option value="weekly" {{ $config['tracking_frequency'] == 'weekly' ? 'selected' : '' }}>Setiap Minggu</option>
                             <option value="monthly" {{ $config['tracking_frequency'] == 'monthly' ? 'selected' : '' }}>Setiap Bulan</option>
                         </select>
-                        <p class="text-[11px] text-gray-400 mt-2 italic">*Sistem akan melacak data alumni yang belum terverifikasi secara berkala.</p>
+                        <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2 italic">*Sistem akan melacak data alumni yang belum terverifikasi secara berkala.</p>
                     </div>
 
                     {{-- Time --}}
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Waktu Eksekusi (Jam:Menit)</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Waktu Eksekusi (Jam:Menit)</label>
                         <input type="time" name="tracking_time" value="{{ $config['tracking_time'] }}"
-                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-                        <p class="text-[11px] text-gray-400 mt-2 italic">*Disarankan pada waktu minim trafik (misal: 02:00 pagi).</p>
+                            class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                        <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2 italic">*Disarankan pada waktu minim trafik (misal: 02:00 pagi).</p>
                     </div>
 
                     {{-- Weekly Option --}}
                     <div id="weekly_option" class="{{ $config['tracking_frequency'] == 'weekly' ? '' : 'hidden' }}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Hari dalam Seminggu</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Hari dalam Seminggu</label>
                         <select name="tracking_day_of_week"
-                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                            class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
                             <option value="1" {{ $config['tracking_day_of_week'] == '1' ? 'selected' : '' }}>Senin</option>
                             <option value="2" {{ $config['tracking_day_of_week'] == '2' ? 'selected' : '' }}>Selasa</option>
                             <option value="3" {{ $config['tracking_day_of_week'] == '3' ? 'selected' : '' }}>Rabu</option>
@@ -52,9 +52,9 @@
 
                     {{-- Monthly Option --}}
                     <div id="monthly_option" class="{{ $config['tracking_frequency'] == 'monthly' ? '' : 'hidden' }}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Tanggal dalam Bulan</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Tanggal dalam Bulan</label>
                         <select name="tracking_day_of_month"
-                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                            class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
                             @for ($i = 1; $i <= 31; $i++)
                                 <option value="{{ $i }}" {{ $config['tracking_day_of_month'] == $i ? 'selected' : '' }}>Tanggal {{ $i }}</option>
                             @endfor
@@ -62,26 +62,26 @@
                     </div>
                 </div>
 
-                <div class="pt-6 border-t border-gray-100 space-y-6">
-                    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <div class="pt-6 border-t border-gray-100 dark:border-gray-700 space-y-6">
+                    <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-700">
                         <div class="flex items-center gap-3">
-                            <div class="shrink-0 w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
+                            <div class="shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg flex items-center justify-center">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </div>
                             <div>
-                                <h4 class="text-sm font-bold text-gray-900">Status Otomatisasi</h4>
-                                <p class="text-[11px] text-gray-500">Aktifkan atau matikan seluruh jadwal pelacakan otomatis secara global.</p>
+                                <h4 class="text-sm font-bold text-gray-900 dark:text-white">Status Otomatisasi</h4>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-400">Aktifkan atau matikan seluruh jadwal pelacakan otomatis secara global.</p>
                             </div>
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" name="tracking_enabled" value="1" class="sr-only peer" {{ $config['tracking_enabled'] == '1' ? 'checked' : '' }}>
-                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:bg-gray-800 after:border-gray-300 dark:border-gray-600 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
 
-                    <h4 class="text-sm font-bold text-gray-900 flex items-center gap-2 px-1">
+                    <h4 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 px-1">
                         <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                         </svg>
@@ -89,28 +89,28 @@
                     </h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Tujuan Program Studi</label>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Tujuan Program Studi</label>
                             <select name="tracking_filter_prodi" 
-                                class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                                class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
                                 <option value="">Semua Program Studi</option>
                                 @foreach($prodiList as $prodi)
                                     <option value="{{ $prodi }}" {{ $config['tracking_filter_prodi'] == $prodi ? 'selected' : '' }}>{{ $prodi }}</option>
                                 @endforeach
                             </select>
-                            <p class="text-[11px] text-gray-400 mt-2 italic">*Hanya lacak alumni dari prodi terpilih saat jadwal tercapai.</p>
+                            <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2 italic">*Hanya lacak alumni dari prodi terpilih saat jadwal tercapai.</p>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Tahun Lulus Specific</label>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Tahun Lulus Specific</label>
                             <input type="number" name="tracking_filter_year" value="{{ $config['tracking_filter_year'] }}" placeholder="Contoh: 2023"
-                                class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-                            <p class="text-[11px] text-gray-400 mt-2 italic">*Kosongkan untuk melacak semua tahun lulus.</p>
+                                class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                            <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2 italic">*Kosongkan untuk melacak semua tahun lulus.</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="pt-6 border-t border-gray-100 flex justify-end">
+                <div class="pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-end">
                     <button type="submit"
-                        class="bg-blue-600 text-white py-2.5 px-6 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-all shadow-sm shadow-blue-200">
+                        class="bg-blue-600 text-white py-2.5 px-6 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-all shadow-sm shadow-blue-200 dark:shadow-none">
                         Simpan Konfigurasi
                     </button>
                 </div>
@@ -118,15 +118,15 @@
         </div>
 
         {{-- Info Card --}}
-        <div class="mt-6 bg-blue-50 rounded-xl border border-blue-100 p-5 flex gap-4">
+        <div class="mt-6 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-100 dark:border-blue-800/50 p-5 flex gap-4">
             <div class="shrink-0 w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
             </div>
             <div>
-                <h4 class="text-sm font-semibold text-blue-900 mb-1">Cara Kerja Penjadwalan</h4>
-                <p class="text-xs text-blue-700 leading-relaxed">
+                <h4 class="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-1">Cara Kerja Penjadwalan</h4>
+                <p class="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
                     Sistem menggunakan <strong>Laravel Scheduler</strong> yang terintegrasi dengan <strong>Cron Job</strong> server Anda. 
                     Sistem akan secara otomatis membaca pengaturan di atas setiap menit dan mengeksekusi proses pelacakan massal hanya pada waktu yang telah Anda tentukan.
                     Pastikan antrean (queue worker) Anda dalam keadaan aktif.
