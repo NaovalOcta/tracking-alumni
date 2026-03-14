@@ -1,51 +1,69 @@
-# ScoutAlumni (AlumniFinder) v1.5
+# ScoutAlumni (AlumniFinder) v1.5 — Hybrid AI-OSINT Tracking
 
-ScoutAlumni is a hybrid AI-OSINT web application designed to track and verify alumni career data. It synthesizes conventional OSINT methodologies with Natural Language Processing (Gemini AI) for maximum accuracy and cost efficiency.
+**ScoutAlumni** (diidentifikasi di antarmuka sebagai **AlumniFinder**) adalah platform cerdas berbasis Hybrid AI-OSINT yang dirancang untuk melacak jejak karir alumni menggunakan Laravel 12. Sistem ini mengintegrasikan teknik pencarian *Multi-Tier Cascade* dengan penalaran AI dari Google Gemini untuk menghasilkan data pelacakan IKU yang akurat dan terverifikasi.
 
-## 🚀 Core Algorithm: "Smart-Context Triangulation"
+## 🛠️ Tech Stack & Spesifikasi Teknis
 
-The system operates through a sophisticated data cycle to ensure high-fidelity tracking:
+Berdasarkan audit internal codebase, berikut adalah spesifikasi teknis yang digunakan:
 
-1.  **Profil Target (Data Preparation)**: Compiles initial profiles with name variations, study programs, and graduation years.
-2.  **Scheduler & Prioritization**: Runs daily jobs prioritizing new alumni, those with insufficient data, or stale records (>6 months).
-3.  **Dynamic Query Generation**: Leverages Gemini AI to formulate intelligent search query variations (e.g., using site operators like LinkedIn, Google Scholar, and GitHub).
-4.  **Multi-Tier Cascade Search**: Executes gradual searches using Google Custom Search (via Serper.dev):
-    *   **Tier 1**: LinkedIn (Professional)
-    *   **Tier 2**: GitHub/Google Scholar (Academic/Technical)
-    *   **Tier 3**: News/Official Web portals.
-5.  **AI Analysis & Disambiguation (Gemini AI)**: 
-    *   **Validation**: Confirms identity by checking graduation year against career start dates (Timeline Logic).
-    *   **Extraction**: Captures Job Title, Instance, and Location.
-    *   **Conflict Resolution**: Applies Recency Analysis to select the most relevant data.
-6.  **Historical Storage**: Maintains an "Evidence Trace" (Links, Snippets, Confidence Scores) and archives old snapshots before updates.
+- **Framework**: [Laravel 12.0 (Stable Edition)](https://laravel.com)
+- **Runtime**: PHP ^8.2
+- **AI Engine**: [Google Gemini 3.1 Flash Lite (Preview)](https://ai.google.dev/) — Dikonfigurasi untuk validasi timeline karir.
+- **Search Infrastructure**: [Serper.dev](https://serper.dev) (Google Search API) dengan batasan 250 query/hari.
+- **Frontend Engine**: Vite v7 + [Tailwind CSS v4.0](https://tailwindcss.com) (Modern CSS Configuration).
+- **Interactivity**: [Alpine.js](https://alpinejs.dev/) untuk komponen UI reaktif.
+- **Database Architecture**: 
+  - **Primary Key**: Menggunakan `nim` (string, 15 karakter) sebagai pengidentifikasi unik utama alumni.
+  - **Storage Strategy**: MySQL dengan tabel terpisah untuk `evidence_logs` (penyimpanan bukti mentah) dan `tracking_histories` (snapshot perubahan data).
 
-## 🛠️ Technology Stack
+## 🚀 Fitur Utama & Logika Sistem
 
-*   **Backend**: Laravel 11.x (PHP)
-*   **Database**: MySQL (Alumni Master, Evidence Logs, Tracking Results)
-*   **Search Infrastructure**: [Serper.dev](https://serper.dev/) (Google Search API)
-*   **Intelligence Engine**: [Google Gemini AI](https://deepmind.google/technologies/gemini/) (Model: `gemini-1.5-flash` for efficiency and `gemini-1.5-pro` for deep analysis)
-*   **Styling**: Vanilla CSS with modern aesthetics (Glassmorphism, Dark Mode support)
-
-## 📦 Key Components
-
-*   **`TrackingService`**: Orchestrates the full search-to-analysis workflow.
-*   **`GeminiAnalysisService`**: Handles strategy generation and evidence analysis via Gemini API.
-*   **`QueryGeneratorService`**: Formulates AI-powered or static fallback search queries.
-*   **`SerperSearchService`**: Manages interaction with the Google Search API.
-
-## ✅ Quality Testing Results
-
-The application has been verified against the quality aspects defined in the design document.
-
-| Aspek Kualitas | Kriteria Uji | Hasil Evaluasi | Status |
-| :--- | :--- | :--- | :--- |
-| **Akurasi (Triangulation)** | Triangulasi data dari berbagai sumber (LinkedIn, Scholar, Web). | `TrackingService` mengimplementasikan multi-tier search (Tier 1-3). Data divalidasi silang menggunakan Gemini AI. | ✅ Pass |
-| **Akurasi (Timeline Logic)** | Verifikasi kesesuaian tahun lulus vs awal karir. | Prompt Gemini di `GeminiAnalysisService` secara eksplisit menginstruksikan AI untuk memeriksa logika timeline karir. | ✅ Pass |
-| **Efisiensi (Token-Based API)** | Penggunaan model AI yang hemat biaya. | Implementasi menggunakan `gemini-1.5-flash` (atau versi flash lainnya) yang memiliki latensi rendah dan biaya token efisien. | ✅ Pass |
-| **Efisiensi (Selective Crawling)** | Mekanisme *Early-stop* untuk menghemat API call. | `TrackingService` memiliki `earlyStopThreshold` (default: 3). Jika data LinkedIn (Tier 1) sudah mencukupi, pencarian tier lain dihentikan. | ✅ Pass |
-| **Reliabilitas (Evidence Log)** | Traceability temuan melalui log bukti. | Temuan disimpan secara detail di tabel `evidence_logs` mencakup URL, snippet mentah, dan tipe sumber untuk audit manual. | ✅ Pass |
-| **Reliabilitas (Conflict Resolution)** | Penanganan kontradiksi data antar sumber. | `GeminiAnalysisService` menggunakan teknik *Recency Analysis* dalam prompt untuk memilih data terbaru jika terjadi konflik informasi. | ✅ Pass |
+1.  **Smart-Context Triangulation**: Melakukan validasi silang antara LinkedIn (Tier 1), Google Scholar/GitHub (Tier 2), dan Website Umum/Berita (Tier 3).
+2.  **Early-Stop Optimization**: Sistem secara otomatis menghentikan pencarian jika menemukan minimal **3 bukti berkualitas tinggi** di Tier 1 (LinkedIn) yang lolos verifikasi kata kunci kontekstual AI.
+3.  **AI Disambiguation**: Gemini AI melakukan analisis "Timeline Logic" untuk memastikan hasil pencarian bukan merupakan orang lain dengan nama yang sama (cek korelasi Tahun Lulus vs Awal Karir).
+4.  **Automated Audit Trail**: Setiap pelacakan menghasilkan `confidence_score`. 
+    - **Score ≥ 0.8**: Status `auto_verified`.
+    - **Score 0.5 - 0.79**: Status `needs_audit` (memerlukan tinjauan manual).
+    - **Score < 0.5**: Status `not_found`.
+5.  **Batch Processing**: Mendukung pelacakan massal hingga 100 alumni sekaligus menggunakan **Laravel Queue (BatchTrackingJob)**.
+6.  **External Automation**: Endpoint khusus di `/automation/run` yang diamankan dengan `CRON_TOKEN` untuk integrasi dengan scheduler eksternal (cron-job.org).
 
 ---
-*Created with focus on Indonesian Higher Education IKU (Indikator Kinerja Utama) requirements.*
+
+## 📊 Matriks Kualitas Aplikasi (Hasil Audit Kode)
+
+| Komponen | Implementasi Teknis | Validasi File |
+| :--- | :--- | :--- |
+| **Identitas Unik** | Primary Key: `nim` | `2025_03_06_000001_create_alumni_table.php` |
+| **Strategi Query** | 3-Tier Cascade Search | `app/Services/QueryGeneratorService.php` |
+| **Efisiensi Biaya** | Early-Stop Threshold: 3 Matches | `app/Services/TrackingService.php` (Line 23) |
+| **Validasi AI** | Prompt Gemini 3.1 dengan Output JSON | `app/Services/GeminiAnalysisService.php` |
+| **Keamanan Cron** | Token-based Authentication via ENV | `routes/web.php` (Line 48) |
+| **Monitoring** | Real-time Progress (Cache-polling) | `app/Http/Controllers/TrackingController.php` |
+
+---
+
+## ⚙️ Instalasi & Penggunaan
+
+1.  **Clone & Install**:
+    ```bash
+    git clone https://github.com/NaovalOcta/tracking-alumni.git
+    composer install && npm install
+    ```
+2.  **Konfigurasi Environment**:
+    Pastikan `.env` memiliki key berikut:
+    - `SERPER_API_KEY`: API Key Serper.dev
+    - `GEMINI_API_KEY`: API Key Google AI Studio
+    - `GEMINI_MODEL`: `gemini-3.1-flash-lite-preview`
+    - `CRON_TOKEN`: Token unik untuk otomasi (minimal 32 karakter direkomendasikan).
+3.  **Database & Assets**:
+    ```bash
+    php artisan migrate
+    npm run build
+    ```
+4.  **Menjalankan Tracking**:
+    - Via Web: Menu **Tracking > Lacak Batch**.
+    - Via CLI: `php artisan schedule:run` atau jalankan queue worker `php artisan queue:work`.
+
+---
+*Dokumentasi ini dihasilkan melalui audit mendalam terhadap struktur kode dan logika bisnis ScoutAlumni v1.5.*
