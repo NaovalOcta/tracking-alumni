@@ -66,4 +66,4 @@ Berdasarkan audit internal codebase, berikut adalah spesifikasi teknis yang digu
     - Via CLI: `php artisan schedule:run` atau jalankan queue worker `php artisan queue:work`.
 
 ---
-*Dokumentasi ini dihasilkan melalui audit mendalam terhadap struktur kode dan logika bisnis ScoutAlumni v1.5.*
+*Email (**admin@alumnifinder.test**) dan Password (**password**) untuk login*
