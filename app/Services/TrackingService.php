@@ -44,100 +44,11 @@ class TrackingService
         // Mark as in-progress
         $alumni->update(['tracking_status' => 'sedang_dilacak']);
 
-        // Step 1: Generate query variations (AI-powered strategy)
-        $this->updateProgress($alumni->nim, 10, 'Merumuskan strategi pencarian dengan Gemini AI...');
-        
-        try {
-            $strategy = $this->queryGenerator->generate($alumni);
-            $queries = $strategy['queries'] ?? [];
-            $contextKeywords = $strategy['context_keywords'] ?? [];
-            
-            Log::info("TrackingService: Generated " . count($queries) . " queries for {$alumni->nim}");
-        } catch (\Exception $e) {
-            Log::error("TrackingService: Strategy generation failed for {$alumni->nim}: " . $e->getMessage());
-            $queries = [];
-            $contextKeywords = [];
-        }
+        $maxRetries = 2;
+        $currentRetry = 0;
+        $bestAnalysis = null;
+        $allEvidenceFinal = [];
 
-        if (empty($queries)) {
-            Log::warning("TrackingService: No queries generated for {$alumni->nim}. Aborting.");
-            $alumni->update(['tracking_status' => 'insufficient_data']);
-            return ['status' => 'insufficient_data', 'message' => 'Gagal merumuskan strategi pencarian.'];
-        }
-
-        // Step 2: Execute searches with early-stop logic
-        $allEvidence = [];
-        $tier1Evidence = 0;
-        $skippedTiers = false;
-
-        foreach ($queries as $queryInfo) {
-            // Early-stop: if we already have enough LinkedIn evidence, skip non-LinkedIn tiers
-            if ($tier1Evidence >= $this->earlyStopThreshold && $queryInfo['tier'] !== 'tier1_linkedin') {
-                if (!$skippedTiers) {
-                    Log::info("TrackingService: Early-stop — {$tier1Evidence} LinkedIn evidence found, skipping remaining tiers for {$alumni->nim}");
-                    $skippedTiers = true;
-                }
-                continue;
-            }
-
-            $tierLabel = str_contains($queryInfo['tier'], 'linkedin') ? 'LinkedIn' : (str_contains($queryInfo['tier'], 'scholar') ? 'Scholar/Github' : 'General Web');
-            $this->updateProgress($alumni->nim, 30, "Menggali data dari {$tierLabel}...");
-            
-            $searchResults = $this->serperSearch->search($queryInfo['query'], 3);
-
-            // Log the search query
-            SearchQuery::create([
-                'alumni_nim'    => $alumni->nim,
-                'query_text'    => $queryInfo['query'],
-                'search_tier'   => $queryInfo['tier'],
-                'results_count' => $searchResults['totalResults'],
-                'searched_at'   => now(),
-            ]);
-
-            // Collect evidence items
-            foreach ($searchResults['items'] as $item) {
-                $allEvidence[] = [
-                    'source_url'  => $item['link'],
-                    'raw_snippet' => $item['snippet'],
-                    'source_type' => $this->mapTierToSourceType($queryInfo['tier'], $item['link']),
-                ];
-
-                // Track tier 1 evidence count for early-stop
-                // Only increment if the snippet contains contextual keywords from Gemini
-                if ($queryInfo['tier'] === 'tier1_linkedin') {
-                    if ($this->containsContextualKeywords($item['snippet'] . ' ' . $item['title'], $contextKeywords)) {
-                        $tier1Evidence++;
-                        Log::info("TrackingService: AI-Contextual LinkedIn match found for {$alumni->nim}: {$item['link']}");
-                    } else {
-                        Log::info("TrackingService: LinkedIn result found but missing AI context for {$alumni->nim}: {$item['link']}");
-                    }
-                }
-            }
-
-            // Avoid hammering the API — tiny delay between queries
-            usleep(200_000); // 200ms
-        }
-
-        if (empty($allEvidence)) {
-            $alumni->update([
-                'tracking_status' => 'not_found',
-                'last_tracked_at' => now(),
-            ]);
-            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence dari pencarian web.'];
-        }
-
-        // Save evidence logs
-        foreach ($allEvidence as $evidence) {
-            EvidenceLog::create([
-                'alumni_nim'  => $alumni->nim,
-                'source_type' => $evidence['source_type'],
-                'source_url'  => $evidence['source_url'],
-                'raw_snippet' => $evidence['raw_snippet'],
-                'searched_at' => now(),
-            ]);
-        }
-
-        // Step 3: Analyze with Gemini AI
         $alumniData = [
             'nim'           => $alumni->nim,
             'nama_lengkap'  => $alumni->nama_lengkap,
@@ -146,14 +57,199 @@ class TrackingService
             'tahun_lulus'   => $alumni->tahun_lulus,
         ];
 
-        $this->updateProgress($alumni->nim, 80, 'Mengekstrak informasi sekunder...');
+        while ($currentRetry <= $maxRetries) {
+            $this->updateProgress($alumni->nim, 10 + ($currentRetry * 5), "Merumuskan strategi pencarian (Percobaan {$currentRetry})...");
+            
+            try {
+                $strategy = $this->queryGenerator->generate($alumni);
+                $queries = $strategy['queries'] ?? [];
+            } catch (\Exception $e) {
+                Log::error("TrackingService: Strategy generation failed: " . $e->getMessage());
+                $queries = [];
+            }
 
-        $analysis = $this->geminiAnalysis->analyze($allEvidence, $alumniData);
-        
-        $this->updateProgress($alumni->nim, 95, 'Menganalisis akurasi dengan Gemini AI...');
-        $confidence = $analysis['confidence'];
+            // Mutation logic for retries: broaden queries
+            if ($currentRetry > 0) {
+                foreach ($queries as &$q) {
+                    $q['query'] = str_replace("\"{$alumni->prodi}\"", "", $q['query']);
+                    $q['query'] = str_replace(strtolower($alumni->prodi), "", strtolower($q['query']));
+                }
+            }
 
-        // Step 4: Determine tracking status based on thresholds
+            if (empty($queries)) {
+                break;
+            }
+
+            $queryStrings = array_unique(array_column($queries, 'query'));
+            $this->updateProgress($alumni->nim, 30, "Mengeksekusi " . count($queryStrings) . " query paralel...");
+            
+            $concurrentResults = $this->serperSearch->searchConcurrent($queryStrings, 3);
+            
+            $allEvidence = [];
+            foreach ($queries as $queryInfo) {
+                $qStr = $queryInfo['query'];
+                $searchResults = $concurrentResults[$qStr] ?? ['items' => [], 'totalResults' => 0];
+
+                SearchQuery::create([
+                    'alumni_nim'    => $alumni->nim,
+                    'query_text'    => $qStr,
+                    'search_tier'   => $queryInfo['tier'],
+                    'results_count' => $searchResults['totalResults'],
+                    'searched_at'   => now(),
+                ]);
+
+                foreach ($searchResults['items'] as $item) {
+                    // Deduplicate URLs
+                    if (!collect($allEvidence)->contains('source_url', $item['link'])) {
+                        $allEvidence[] = [
+                            'source_url'  => $item['link'],
+                            'raw_snippet' => $item['snippet'] . ' - ' . $item['title'],
+                            'source_type' => $this->mapTierToSourceType($queryInfo['tier'], $item['link']),
+                        ];
+                    }
+                }
+            }
+
+            if (empty($allEvidence)) {
+                $currentRetry++;
+                continue;
+            }
+
+            $this->updateProgress($alumni->nim, 60, "Fase A: Menganalisis hasil pencarian dengan Gemini AI...");
+            $analysis = $this->geminiAnalysis->analyze($allEvidence, $alumniData);
+
+            // Post-validation: cek UMM affiliation check
+            if (isset($analysis['is_umm_verified']) && $analysis['is_umm_verified'] === false) {
+                $analysis['confidence'] = min($analysis['confidence'], 0.30);
+                Log::warning("TrackingService: UMM affiliation NOT verified for {$alumni->nim}. Capping confidence.");
+            }
+
+            // Post-validation: URL LinkedIn valid format profil
+            if (!empty($analysis['linkedin_url'])) {
+                if (!preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $analysis['linkedin_url'])) {
+                    $analysis['linkedin_url'] = null;
+                }
+            }
+
+            if ($bestAnalysis === null || $analysis['confidence'] > $bestAnalysis['confidence']) {
+                $bestAnalysis = $analysis;
+                $allEvidenceFinal = $allEvidence;
+            }
+
+            if ($bestAnalysis['confidence'] >= 0.70) {
+                break;
+            }
+
+            Log::info("TrackingService: Confidence {$analysis['confidence']} < 0.70. Retrying...");
+            $currentRetry++;
+            sleep(3);
+        }
+
+        if ($bestAnalysis === null) {
+            $alumni->update(['tracking_status' => 'not_found', 'last_tracked_at' => now()]);
+            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence di web.'];
+        }
+
+        foreach ($allEvidenceFinal as $evidence) {
+            EvidenceLog::create([
+                'alumni_nim'  => $alumni->nim,
+                'source_type' => $evidence['source_type'],
+                'source_url'  => $evidence['source_url'],
+                'raw_snippet' => substr($evidence['raw_snippet'], 0, 1000),
+                'searched_at' => now(),
+            ]);
+        }
+
+        // FASE B: Social Media Discovery
+        $sosmedAlumni = [
+            'ig_url'     => null,
+            'fb_url'     => null,
+            'tiktok_url' => null
+        ];
+
+        if ($bestAnalysis['confidence'] >= 0.50) {
+            $this->updateProgress($alumni->nim, 75, "Fase B: Penemuan media sosial berbasis identitas...");
+            
+            // Extract username if possible
+            $linkedinUsername = null;
+            if (!empty($bestAnalysis['linkedin_url'])) {
+                $parts = explode('/in/', $bestAnalysis['linkedin_url']);
+                if (count($parts) > 1) {
+                    $linkedinUsername = trim(explode('?', $parts[1])[0], '/');
+                }
+            }
+
+            $sosmedQueries = $this->queryGenerator->generateSocialMediaQueries(
+                $alumni->nama_lengkap, 
+                $linkedinUsername, 
+                $bestAnalysis['instansi'], 
+                $bestAnalysis['lokasi']
+            );
+
+            if (!empty($sosmedQueries)) {
+                $sosmedQueryStrings = array_unique(array_column($sosmedQueries, 'query'));
+                $sosmedResults = $this->serperSearch->searchConcurrent($sosmedQueryStrings, 3);
+                
+                $sosmedEvidence = [];
+                foreach ($sosmedQueries as $queryInfo) {
+                    $qStr = $queryInfo['query'];
+                    SearchQuery::create([
+                        'alumni_nim'    => $alumni->nim,
+                        'query_text'    => $qStr,
+                        'search_tier'   => 'tier2_ig_tiktok',
+                        'results_count' => $sosmedResults[$qStr]['totalResults'] ?? 0,
+                        'searched_at'   => now(),
+                    ]);
+                    
+                    foreach ($sosmedResults[$qStr]['items'] ?? [] as $item) {
+                        $sosmedEvidence[] = [
+                            'source_url'  => $item['link'],
+                            'raw_snippet' => $item['snippet'] . ' - ' . $item['title'],
+                            'source_type' => $this->mapTierToSourceType('tier2_ig_tiktok', $item['link']),
+                        ];
+                    }
+                }
+
+                if (!empty($sosmedEvidence)) {
+                    $sosmedAlumni = $this->geminiAnalysis->analyzeSocialMedia($sosmedEvidence, [
+                        'nama' => $alumni->nama_lengkap,
+                        'instansi' => $bestAnalysis['instansi'],
+                        'lokasi' => $bestAnalysis['lokasi']
+                    ]);
+                }
+            }
+        }
+
+        // Secondary Enrichment (Instansi)
+        $instansi = $bestAnalysis['instansi'];
+        $sosmedInstansi = [
+            'linkedin' => null,
+            'ig' => null,
+            'fb' => null,
+            'tiktok' => null
+        ];
+
+        if (!empty($instansi) && $instansi !== 'null') {
+            $this->updateProgress($alumni->nim, 85, "Secondary enrichment untuk perusahaan: {$instansi}...");
+            $enrichQuery = "\"{$instansi}\" site:linkedin.com/company OR site:instagram.com OR site:facebook.com OR site:tiktok.com";
+            $enrichResult = $this->serperSearch->searchConcurrent([$enrichQuery], 4);
+            $items = $enrichResult[$enrichQuery]['items'] ?? [];
+            
+            foreach ($items as $item) {
+                $url = collect(explode('?', $item['link']))->first(); // clean params
+                if (empty($sosmedInstansi['linkedin']) && str_contains($url, 'linkedin.com/company/')) {
+                    $sosmedInstansi['linkedin'] = $url;
+                } elseif (empty($sosmedInstansi['ig']) && str_contains($url, 'instagram.com/')) {
+                    $sosmedInstansi['ig'] = $url;
+                } elseif (empty($sosmedInstansi['fb']) && str_contains($url, 'facebook.com/')) {
+                    $sosmedInstansi['fb'] = $url;
+                } elseif (empty($sosmedInstansi['tiktok']) && str_contains($url, 'tiktok.com/')) {
+                    $sosmedInstansi['tiktok'] = $url;
+                }
+            }
+        }
+
+        $confidence = $bestAnalysis['confidence'];
         $autoVerifyThreshold = config('scoutalumni.tracking.auto_verify_threshold', 0.8);
         $needsAuditThreshold = config('scoutalumni.tracking.needs_audit_threshold', 0.5);
 
@@ -165,38 +261,48 @@ class TrackingService
             $newStatus = 'not_found';
         }
 
-        // Step 5: Save tracking result
+        // Save tracking result
         $result = TrackingResult::updateOrCreate(
             ['alumni_nim' => $alumni->nim],
             [
-                'jabatan'          => $analysis['jabatan'],
-                'instansi'         => $analysis['instansi'],
-                'bidang_pekerjaan' => $analysis['bidang_pekerjaan'],
-                'lokasi'           => $analysis['lokasi'],
-                'linkedin_url'     => $analysis['linkedin_url'],
+                'jabatan'          => $bestAnalysis['jabatan'],
+                'instansi'         => $bestAnalysis['instansi'],
+                'kategori_pekerjaan'=> $bestAnalysis['kategori_pekerjaan'],
+                'tipe_posisi'      => $bestAnalysis['tipe_posisi'] ?? null,
+                'posisi_sejak'     => $bestAnalysis['posisi_sejak'] ?? null,
+                'lokasi'           => $bestAnalysis['lokasi'],
+                'linkedin_url'     => $bestAnalysis['linkedin_url'],
+                'ig_url'           => $sosmedAlumni['ig_url'] ?? null,
+                'fb_url'           => $sosmedAlumni['fb_url'] ?? null,
+                'tiktok_url'       => $sosmedAlumni['tiktok_url'] ?? null,
+                'email'            => $bestAnalysis['email'],
+                'no_hp'            => $bestAnalysis['no_hp'],
+                'is_umm_verified'  => $bestAnalysis['is_umm_verified'] ?? false,
+                'umm_evidence'     => $bestAnalysis['umm_evidence'] ?? null,
+                'sosmed_instansi_linkedin' => $sosmedInstansi['linkedin'],
+                'sosmed_instansi_ig'       => $sosmedInstansi['ig'],
+                'sosmed_instansi_fb'       => $sosmedInstansi['fb'],
+                'sosmed_instansi_tiktok'   => $sosmedInstansi['tiktok'],
                 'confidence_score' => $confidence,
-                'ai_notes'         => $analysis['notes'],
+                'ai_notes'         => trim(($bestAnalysis['notes'] ?? '') . "\n" . ($bestAnalysis['catatan_posisi'] ?? '')),
                 'source_type'      => 'serper_gemini',
             ]
         );
-        $result->touch(); // Force updated_at for sorting consistency
+        $result->touch();
 
-        // Step 6: Save tracking history snapshot
         TrackingHistory::create([
             'alumni_nim'    => $alumni->nim,
-            'snapshot_data' => $analysis,
+            'snapshot_data' => array_merge($bestAnalysis, ['sosmed_instansi' => $sosmedInstansi]),
             'changed_reason' => 'Tracking otomatis - confidence: ' . round($confidence * 100) . '%',
             'created_at'    => now(),
         ]);
 
-        // Step 7: Update alumni status
         $alumni->update([
             'tracking_status' => $newStatus,
             'last_tracked_at' => now(),
         ]);
 
         $this->updateProgress($alumni->nim, 100, "Selesai! Status: {$newStatus}");
-
         Log::info("TrackingService: Completed {$alumni->nim} — status: {$newStatus}, confidence: {$confidence}");
 
         return [

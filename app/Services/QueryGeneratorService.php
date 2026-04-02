@@ -47,9 +47,6 @@ class QueryGeneratorService
         ];
     }
 
-    /**
-     * Static fallback logic for query generation.
-     */
     protected function generateStaticQueries(Alumni $alumni): array
     {
         $queries = [];
@@ -62,10 +59,28 @@ class QueryGeneratorService
             return $v !== $namaLengkap;
         })));
 
-        // Tier 1: LinkedIn
+        // Tier 1: LinkedIn + Anchor UMM
         $queries[] = [
-            'query' => "\"{$namaLengkap}\" site:linkedin.com/in",
+            'query' => "\"{$namaLengkap}\" \"Universitas Muhammadiyah Malang\" site:linkedin.com/in",
             'tier'  => 'tier1_linkedin',
+        ];
+
+        // Tier 2: LinkedIn Broad
+        $queries[] = [
+            'query' => "\"{$namaLengkap}\" \"UMM\" OR \"Muhammadiyah Malang\" site:linkedin.com/in",
+            'tier'  => 'tier1_linkedin',
+        ];
+
+        // Tier 3: Web Umum + Portal Berita
+        $queries[] = [
+            'query' => "\"{$namaLengkap}\" \"UMM\" OR \"Muhammadiyah Malang\" alumni",
+            'tier'  => 'tier4_web',
+        ];
+
+        // Tier 4: Prodi-specific
+        $queries[] = [
+            'query' => "\"{$namaLengkap}\" \"{$prodi}\" \"Malang\"",
+            'tier'  => 'tier4_web',
         ];
 
         if (!empty($namaVariasi)) {
@@ -75,35 +90,53 @@ class QueryGeneratorService
             ];
         }
 
-        $queries[] = [
-            'query' => "\"{$namaLengkap}\" \"{$prodi}\" site:linkedin.com",
-            'tier'  => 'tier1_linkedin',
-        ];
+        return array_slice($queries, 0, $this->maxQueries);
+    }
 
-        // Tier 2: Academic
-        $queries[] = [
-            'query' => "\"{$namaLengkap}\" site:scholar.google.com",
-            'tier'  => 'tier2_scholar_github',
-        ];
+    /**
+     * Generate queries for Phase B: Social Media Discovery.
+     */
+    public function generateSocialMediaQueries(string $namaLengkap, ?string $linkedinUsername, ?string $instansi, ?string $lokasi): array
+    {
+        $queries = [];
 
-        // Tier 3: General
-        $queries[] = [
-            'query' => "\"{$namaLengkap}\" \"{$prodi}\"",
-            'tier'  => 'tier3_news_web',
-        ];
-
-        if ($fakultas) {
+        // Technique 1: LinkedIn Username -> Cross-Platform Search
+        if (!empty($linkedinUsername)) {
             $queries[] = [
-                'query' => "\"{$namaLengkap}\" \"{$fakultas}\"",
-                'tier'  => 'tier3_news_web',
+                'query' => "\"{$linkedinUsername}\" site:instagram.com OR site:tiktok.com OR site:facebook.com",
+                'tier'  => 'tier2_ig_tiktok',
             ];
         }
 
+        // Technique 2: Identity-Enriched Social Search
+        $contextualInfo = [];
+        if (!empty($instansi)) {
+            $contextualInfo[] = "\"{$instansi}\"";
+        }
+        if (!empty($lokasi)) {
+            $contextualInfo[] = "\"{$lokasi}\"";
+        }
+        $contextStr = implode(' OR ', $contextualInfo);
+
+        if (!empty($contextStr)) {
+            $queries[] = [
+                'query' => "\"{$namaLengkap}\" ({$contextStr}) site:instagram.com OR site:facebook.com OR site:tiktok.com",
+                'tier'  => 'tier2_ig_tiktok',
+            ];
+        }
+
+        // Technique 3: Facebook Real-Name Search + Bio Aggregator
         $queries[] = [
-            'query' => "\"{$namaLengkap}\" site:github.com",
-            'tier'  => 'tier2_scholar_github',
+            'query' => "\"{$namaLengkap}\" site:facebook.com " . (!empty($lokasi) ? "\"{$lokasi}\"" : "\"Malang\""),
+            'tier'  => 'tier3_facebook',
         ];
 
-        return array_slice($queries, 0, $this->maxQueries);
+        $queries[] = [
+            'query' => "\"{$namaLengkap}\" site:linktr.ee OR site:linkin.bio",
+            'tier'  => 'tier4_web',
+        ];
+
+        // Limit to 3 parallel requests max to save API limits
+        return array_slice($queries, 0, 3);
     }
 }

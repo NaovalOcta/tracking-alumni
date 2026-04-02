@@ -13,8 +13,22 @@ class TrackingResult extends Model
         'jabatan',
         'instansi',
         'bidang_pekerjaan',
+        'kategori_pekerjaan',
+        'tipe_posisi',
+        'posisi_sejak',
         'lokasi',
         'linkedin_url',
+        'ig_url',
+        'fb_url',
+        'tiktok_url',
+        'email',
+        'no_hp',
+        'sosmed_instansi_linkedin',
+        'sosmed_instansi_ig',
+        'sosmed_instansi_fb',
+        'sosmed_instansi_tiktok',
+        'is_umm_verified',
+        'umm_evidence',
         'confidence_score',
         'ai_notes',
         'verified_by',
@@ -23,6 +37,7 @@ class TrackingResult extends Model
 
     protected $casts = [
         'confidence_score' => 'decimal:2',
+        'is_umm_verified' => 'boolean',
         'verified_at' => 'datetime',
     ];
 

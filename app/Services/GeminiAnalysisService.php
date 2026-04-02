@@ -112,9 +112,18 @@ class GeminiAnalysisService
             'confidence'       => 0.0,
             'jabatan'          => null,
             'instansi'         => null,
-            'bidang_pekerjaan' => null,
+            'kategori_pekerjaan'=> null,
+            'tipe_posisi'      => null,
+            'posisi_sejak'     => null,
             'lokasi'           => null,
             'linkedin_url'     => null,
+            'ig_url'           => null,
+            'fb_url'           => null,
+            'tiktok_url'       => null,
+            'email'            => null,
+            'no_hp'            => null,
+            'is_umm_verified'  => false,
+            'umm_evidence'     => null,
             'notes'            => '',
         ];
 
@@ -167,9 +176,18 @@ class GeminiAnalysisService
                             'confidence'       => (float) ($parsed['confidence'] ?? 0.0),
                             'jabatan'          => $parsed['jabatan'] ?? null,
                             'instansi'         => $parsed['instansi'] ?? null,
-                            'bidang_pekerjaan' => $parsed['bidang_pekerjaan'] ?? null,
+                            'kategori_pekerjaan'=> $parsed['kategori_pekerjaan'] ?? null,
+                            'tipe_posisi'      => $parsed['tipe_posisi'] ?? null,
+                            'posisi_sejak'     => $parsed['posisi_sejak'] ?? null,
                             'lokasi'           => $parsed['lokasi'] ?? null,
                             'linkedin_url'     => $parsed['linkedin_url'] ?? null,
+                            'ig_url'           => $parsed['ig_url'] ?? null,
+                            'fb_url'           => $parsed['fb_url'] ?? null,
+                            'tiktok_url'       => $parsed['tiktok_url'] ?? null,
+                            'email'            => $parsed['email'] ?? null,
+                            'no_hp'            => $parsed['no_hp'] ?? null,
+                            'is_umm_verified'  => (bool) ($parsed['is_umm_verified'] ?? false),
+                            'umm_evidence'     => $parsed['umm_evidence'] ?? null,
                             'notes'            => $parsed['notes'] ?? '',
                         ];
                     }
@@ -207,15 +225,12 @@ class GeminiAnalysisService
         return array_merge($defaultResult, ['notes' => 'Gemini API failed after ' . $maxRetries . ' retries.']);
     }
 
-    /**
-     * Build the strategy prompt for Gemini.
-     */
     protected function buildStrategyPrompt($alumni): string
     {
         $namaVariasi = !empty($alumni->nama_variasi) ? 'Nama variasi: ' . implode(', ', $alumni->nama_variasi) : '';
 
         return <<<PROMPT
-Kamu adalah ahli OSINT dan detektif karir. Tugasmu adalah merumuskan strategi pencarian di internet untuk melacak alumni universitas berikut:
+Kamu adalah ahli OSINT dan detektif karir. Tugasmu adalah merumuskan strategi pencarian di internet untuk melacak identitas karir alumni universitas berikut (Fase A).
 
 ## Profil Alumni
 - Nama: {$alumni->nama_lengkap}
@@ -226,91 +241,143 @@ Kamu adalah ahli OSINT dan detektif karir. Tugasmu adalah merumuskan strategi pe
 - Tahun Lulus: {$alumni->tahun_lulus}
 
 ## Instruksi
-1. **QUERIES**: Buat 6-8 query pencarian Google yang efektif untuk menemukan profil karir atau LinkedIn alumni ini.
-   - Gunakan operator pencarian seperti `site:linkedin.com/in`, `site:scholar.google.com`, `site:github.com`.
-   - Gunakan tanda kutip untuk nama lengkap.
-   - Variasikan query dengan menyatukan nama dengan kata kunci prodi, atau fakultas.
-   - Targetkan Tier 1 (LinkedIn), Tier 2 (Akademik), dan Tier 3 (General Web).
-   - **PENTING**: Anda WAJIB menggunakan nilai "tier" berikut secara eksak:
-     * `tier1_linkedin` (untuk LinkedIn)
-     * `tier2_scholar_github` (untuk Scholar, ResearchGate, GitHub)
-     * `tier3_news_web` (untuk Portal Berita, Web Organisasi, atau Web Umum)
+1. **QUERIES**: Buat 4-5 query pencarian Google yang fokus DUA hal saja: Profil Profesional (LinkedIn) dan Publikasi Universitas/Berita. JANGAN sertakan pencarian Instagram/Facebook/Tiktok.
+   - Gunakan `site:linkedin.com/in` untuk query profesional.
+   - Gunakan parameter UMM/Universitas Muhammadiyah Malang.
+   - **PENTING**: Gunakan nilai "tier" ini saja:
+     * `tier1_linkedin`
+     * `tier4_web`
 
-2. **CONTEXT KEYWORDS**: Buat daftar 10-15 kata kunci spesifik (1-3 kata) yang kemungkinan besar muncul di profil profesional/sosial alumni ini.
-   - Masukkan singkatan universitas yang umum (misal: UI, ITB, UGM jika relevan - asumsi lokal Indonesia).
-   - Masukkan nama jabatan/posisi yang lazim untuk lulusan prodi tersebut (misal: Farmasi -> Apoteker, TTK, QC, Farmakologi).
-   - Masukkan istilah industri terkait prodi tersebut.
-   - JANGAN masukkan kata generik seperti "pendidikan", "pengalaman", "tentang".
-   - Kata kunci ini akan digunakan untuk memvalidasi apakah hasil pencarian (seperti LinkedIn) benar-benar milik alumni yang kita cari.
+2. **CONTEXT KEYWORDS**: Buat daftar 5-10 kata kunci konteks (1-3 kata) (seperti UMM, jenis jabatan).
 
 ## Format Output (JSON)
-Jawab HANYA dalam format JSON berikut:
 {
   "queries": [
-    {"query": "\"Nama\" site:linkedin.com/in", "tier": "tier1_linkedin"},
-    ...
+    {"query": "\"Nama\" \"Universitas Muhammadiyah Malang\" site:linkedin.com/in", "tier": "tier1_linkedin"}
   ],
-  "context_keywords": ["kata_kunci1", "kata_kunci2", ...]
+  "context_keywords": ["kata_kunci1"]
 }
 PROMPT;
     }
 
-    /**
-     * Build the analysis prompt for Gemini.
-     */
     protected function buildPrompt(array $evidences, array $alumniData): string
     {
         $evidenceText = '';
         foreach ($evidences as $i => $evidence) {
             $num = $i + 1;
-            $evidenceText .= "--- Evidence #{$num} ---\n";
-            $evidenceText .= "Source: {$evidence['source_url']}\n";
-            $evidenceText .= "Type: {$evidence['source_type']}\n";
-            $evidenceText .= "Snippet: {$evidence['raw_snippet']}\n\n";
+            $evidenceText .= "--- Evidence #{$num} ---\nSource: {$evidence['source_url']}\nType: {$evidence['source_type']}\nSnippet: {$evidence['raw_snippet']}\n\n";
         }
 
-        $namaVariasi = '';
-        if (!empty($alumniData['nama_variasi'])) {
-            $namaVariasi = 'Nama variasi: ' . implode(', ', $alumniData['nama_variasi']);
-        }
+        $namaVariasi = !empty($alumniData['nama_variasi']) ? 'Nama variasi: ' . implode(', ', $alumniData['nama_variasi']) : '';
 
         return <<<PROMPT
-Kamu adalah sistem AI untuk memvalidasi dan mengekstrak informasi karir alumni universitas.
+Kamu adalah sistem AI untuk memvalidasi dan mengekstrak informasi karir alumni.
 
 ## Profil Alumni Target
 - Nama: {$alumniData['nama_lengkap']}
 - {$namaVariasi}
-- NIM: {$alumniData['nim']}
 - Program Studi: {$alumniData['prodi']}
 - Tahun Lulus: {$alumniData['tahun_lulus']}
 
-## Evidence dari Pencarian Web
+## Evidence Web
 {$evidenceText}
 
 ## Instruksi
-1. **VALIDASI**: Tentukan apakah evidence di atas benar merujuk ke alumni yang sama (bukan orang lain dengan nama mirip). Perhatikan kesesuaian tahun lulus vs tahun mulai karir (logika kewajaran).
-2. **EKSTRAKSI**: Jika valid, ekstrak informasi terkini tentang:
-   - Jabatan/posisi terkini
-   - Instansi/perusahaan
-   - Bidang pekerjaan/industri
-   - Lokasi (kota/negara)
-   - URL LinkedIn (jika ada)
-3. **CONFIDENCE**: Berikan skor kepercayaan 0.0-1.0 berdasarkan:
-   - 0.8-1.0: Data sangat meyakinkan, multiple sumber konsisten
-   - 0.5-0.79: Data cukup meyakinkan tapi perlu review manual
-   - 0.0-0.49: Data tidak cukup atau meragukan
-4. **CONFLICT RESOLUTION**: Jika ada perbedaan antar sumber, pilih data terbaru (Recency Analysis).
+1. **VALIDASI AFILIASI UMM (WAJIB)**:
+   - Pastikan terdapat bukti afiliasi target dengan "Universitas Muhammadiyah Malang" / "UMM".
+   - Jika TIDAK ADA afiliasi UMM, confidence WAJIB ≤ 0.30 & is_umm_verified = false.
+2. **EKSTRAKSI POSISI (RECENCY ANALYSIS)**:
+   - Ambil hanya pekerjaan TERKINI (Present / Current).
+   - Abaikan pekerjaan berformat Magang / Internship/ Praktik, kecuali jika itu SATU-SATUNYA yang ditemukan.
+   - Tentukan `tipe_posisi`: "current" (aktif), "past", atau "internship_only".
+3. **PILIH KATEGORI**: "PNS", "Swasta", atau "Wirausaha".
+4. **PENALTI CONFIDENCE**: Beda prodi (-0.2), Lulus beda jauh (-0.15). Max 0.40 jika LinkedIn tanpa mention UMM.
 
-## Format Output (JSON)
-Jawab HANYA dalam format JSON berikut, tanpa teks tambahan:
+## Format Output (JSON Strict)
 {
-  "confidence": 0.0,
-  "jabatan": "string atau null",
-  "instansi": "string atau null",
-  "bidang_pekerjaan": "string atau null",
-  "lokasi": "string atau null",
-  "linkedin_url": "string atau null",
-  "notes": "penjelasan singkat tentang analisis dan alasan confidence score"
+  "confidence": 0.85,
+  "is_umm_verified": true,
+  "umm_evidence": "Disebutkan di profil LinkedIn pada history education: UMM",
+  "tipe_posisi": "current/past/internship_only",
+  "posisi_sejak": "2021",
+  "jabatan": "null jika tidak ada",
+  "instansi": "null jika tidak ada",
+  "kategori_pekerjaan": "Swasta",
+  "lokasi": "Jakarta",
+  "linkedin_url": "URL atau null",
+  "email": "null",
+  "no_hp": "null",
+  "notes": "Alasan detail terkait identitas"
+}
+PROMPT;
+    }
+    public function analyzeSocialMedia(array $evidences, array $context): array
+    {
+        $defaultResult = [
+            'ig_url' => null,
+            'fb_url' => null,
+            'tiktok_url' => null,
+        ];
+
+        if (empty($evidences) || !$this->isConfigured()) return $defaultResult;
+
+        $prompt = $this->buildSocialMediaPrompt($evidences, $context);
+
+        try {
+            $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}";
+            $response = Http::timeout(20)->post($url, [
+                'contents' => [['parts' => [['text' => $prompt]]]],
+                'generationConfig' => ['responseMimeType' => 'application/json', 'temperature' => 0.1],
+            ]);
+
+            if ($response->successful()) {
+                $text = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '';
+                $parsed = json_decode($text, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    return array_merge($defaultResult, [
+                        'ig_url' => $parsed['ig_url'] ?? null,
+                        'fb_url' => $parsed['fb_url'] ?? null,
+                        'tiktok_url' => $parsed['tiktok_url'] ?? null,
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+             Log::error('GeminiAnalysis: Social media analysis err', ['msg' => $e->getMessage()]);
+        }
+        return $defaultResult;
+    }
+
+    protected function buildSocialMediaPrompt(array $evidences, array $context): string
+    {
+        $evidenceText = '';
+        foreach ($evidences as $i => $ev) {
+            $evidenceText .= "URL: {$ev['source_url']}\nSnippet: {$ev['raw_snippet']}\n\n";
+        }
+        $instansi = $context['instansi'] ?? '';
+        $lokasi = $context['lokasi'] ?? '';
+        $nama = $context['nama'] ?? '';
+
+        return <<<PROMPT
+Anda adalah spesialis OSINT. Verifikasi apakah profil media sosial berikut milik target ini.
+Target Name: {$nama}
+Target Job: {$instansi}
+Target Location: {$lokasi}
+Target University: Universitas Muhammadiyah Malang (UMM)
+
+EVIDENCE:
+{$evidenceText}
+
+INSTRUKSI CROSS-REFERENCE (MULTI-SIGNAL MATCHING):
+1. Anda wajib mencocokkan snippet URL dengan profil target.
+2. Sinyal yang valid: Name match (variasi ok), Location match, Job match, Univ match.
+3. JIKA ada min. 2 sinyal cocok -> Ekstrak URL asli.
+4. JIKA hanya 1 sinyal cocok (nama saja tanpa konteks) -> KEMBALIKAN NULL.
+
+FORMAT JSON STRICT:
+{
+  "ig_url": "url instagram target jika valid (atau null)",
+  "fb_url": "url facebook target jika valid (atau null)",
+  "tiktok_url": "url tiktok target jika valid (atau null)"
 }
 PROMPT;
     }
