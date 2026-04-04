@@ -147,6 +147,11 @@ class TrackingService
                 $snippetHash = md5($item['snippet'] . $item['title']);
                 
                 if (!collect($allEvidenceFinal)->contains('source_url', $item['link']) && !in_array($snippetHash, $uniqueSnippets)) {
+                    // V7.2.2: Apply Smart Pre-Filter
+                    if (!$this->isSnippetRelevant($item['snippet'] . ' ' . $item['title'], $item['link'], $alumniData)) {
+                        continue;
+                    }
+
                     $allEvidenceFinal[] = [
                         'source_url'  => $item['link'],
                         'raw_snippet' => $item['snippet'] . ' - ' . $item['title'],
@@ -553,7 +558,7 @@ class TrackingService
                 'sosmed_instansi_fb'       => $sosmedInstansi['fb'],
                 'sosmed_instansi_tiktok'   => $sosmedInstansi['tiktok'],
                 'confidence_score'    => $confidence,
-                'ai_notes'            => "V7.2 Pipeline | Identity: {$gateStatus} ({$identityConfidence}) | Coverage: {$coverageTier} ({$fieldsCovered}/5) | Penalty: {$conflictPenalty}",
+                'ai_notes'            => $geminiResult['alasan_analisis'] ?? "V7.2 Pipeline | Identity: {$gateStatus} ({$identityConfidence}) | Coverage: {$coverageTier} ({$fieldsCovered}/5) | Penalty: {$conflictPenalty}",
                 'source_type'         => 'serper_gemini',
                 // V7.2 new fields
                 'identity_confidence' => $identityConfidence,
@@ -749,6 +754,40 @@ class TrackingService
         }
 
         return false;
+    }
+
+    /**
+     * Smart Tiered Pre-Filter (V7.2.2)
+     * Handles context-aware filtering safely but strictly to reduce noise.
+     */
+    private function isSnippetRelevant(string $snippetText, string $url, array $alumniData): bool
+    {
+        $text = strtolower($snippetText);
+        $url = strtolower($url);
+        $nameParts = explode(' ', strtolower($alumniData['nama_lengkap']));
+
+        // RULE 1: Name Check (At least one significant part of the name must exist)
+        $nameMatch = false;
+        foreach ($nameParts as $part) {
+            if (strlen($part) > 2 && str_contains($text, $part)) {
+                $nameMatch = true;
+                break;
+            }
+        }
+        if (!$nameMatch) return false;
+
+        // RULE 2: Platform Bypass (The LinkedIn Exception)
+        // Education is often truncated in Google snippets. If it's a LinkedIn profile AND the name matches, let it through to Gemini.
+        if (str_contains($url, 'linkedin.com/in/')) {
+            return true;
+        }
+
+        // RULE 3: Strict Context for General Web & Other Social Media
+        $hasUmm = preg_match('/\bumm\b/', $text);
+        $hasMuhMalang = str_contains($text, 'muhammadiyah') && str_contains($text, 'malang');
+        $hasProdi = str_contains($text, strtolower($alumniData['prodi']));
+
+        return $hasUmm || $hasMuhMalang || $hasProdi;
     }
 
     /**

@@ -406,6 +406,7 @@ PROMPT;
                 ],
             ],
             'extracted_conflicts' => [],
+            'alasan_analisis' => 'Tidak ada catatan analisis eksplisit.',
         ];
 
         if (!$this->isConfigured()) {
@@ -460,6 +461,7 @@ PROMPT;
                             'extracted_conflicts' => is_array($parsed['extracted_conflicts'] ?? null) 
                                 ? $parsed['extracted_conflicts'] 
                                 : [],
+                            'alasan_analisis' => $parsed['alasan_analisis'] ?? 'Tidak ada catatan analisis eksplisit.',
                         ];
                     }
 
@@ -515,7 +517,7 @@ TARGET ALUMNI PROFILE:
 
 WEB EVIDENCES:
 {$evidenceText}
-WARNING: You are receiving an exhaustive scrape of up to 40 search snippets. Most are NOISE or profile clones. Focus strictly on snippets containing exact name matches AND Muhammadiyah Malang/UMM. Rely on your `extracted_conflicts` schema if snippets provide conflicting jobs. Do NOT hallucinate jobs from noise.
+The provided snippets have been PRE-FILTERED by a strict PHP system and are highly likely to belong to the target alumni. Your primary task is to deeply analyze these clean snippets, confidently extract the linkedin_url, and accurately distinguish between real professional jobs vs student internships/ambassador roles. Do NOT return null for LinkedIn if a valid matching profile exists. Provide clear human-readable reasoning in alasan_analisis.
 
 You are a Zero-Tolerance Data Extraction Tool. Follow Evidence Hierarchies. Do NOT infer or complete fields.
 
@@ -544,7 +546,8 @@ JSON SCHEMA EXPECTED:
         "value": "<conflicting_value>",
         "source_url": "<source_of_conflict>"
      }
-  ]
+  ],
+  "alasan_analisis": "<string: Berikan penjelasan naratif dalam bahasa Indonesia yang mudah dipahami manusia mengenai mengapa Anda memilih pekerjaan ini, mengaitkan bukti, dan alasan penolakan data lain jika ada konflik>"
 }
 PROMPT;
     }
