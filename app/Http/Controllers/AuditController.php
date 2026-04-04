@@ -32,6 +32,10 @@ class AuditController extends Controller
      */
     public function verify(Request $request, string $nim)
     {
+        $request->validate([
+            'manual_confidence' => 'nullable|in:high,medium,low',
+        ]);
+
         $alumni = Alumni::findOrFail($nim);
         $result = $alumni->latestTrackingResult;
 
@@ -40,10 +44,16 @@ class AuditController extends Controller
         }
 
         // Update result with verification info
-        $result->update([
+        $updateData = [
             'verified_by' => Auth::id(),
             'verified_at' => now(),
-        ]);
+        ];
+
+        if ($request->has('manual_confidence') && $request->manual_confidence) {
+            $updateData['manual_confidence'] = $request->input('manual_confidence');
+        }
+
+        $result->update($updateData);
 
         // Update alumni status
         $alumni->update(['tracking_status' => 'auto_verified']); // Or use 'verified' if we want to distinguish
@@ -52,7 +62,7 @@ class AuditController extends Controller
         TrackingHistory::create([
             'alumni_nim' => $alumni->nim,
             'snapshot_data' => $result->toArray(),
-            'changed_reason' => 'Verifikasi manual oleh ' . Auth::user()->name,
+            'changed_reason' => 'Verifikasi manual oleh ' . Auth::user()->name . ($request->input('manual_confidence') ? ' (Confidence: ' . $request->input('manual_confidence') . ')' : ''),
             'created_at' => now(),
         ]);
 

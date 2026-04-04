@@ -1,0 +1,31 @@
+﻿On branch Development
+Your branch is up to date with 'origin/Development'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .gitignore
+	modified:   app/Http/Controllers/AuditController.php
+	modified:   app/Models/TrackingResult.php
+	modified:   app/Services/GeminiAnalysisService.php
+	modified:   app/Services/SerperSearchService.php
+	modified:   app/Services/TrackingService.php
+	modified:   config/scoutalumni.php
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	app/Models/ConflictLog.php
+	app/Models/FetchCache.php
+	app/Models/QueryHash.php
+	app/Services/FetchCacheService.php
+	app/Services/IdentityValidator.php
+	app/Services/PriorityResolverEngine.php
+	database/migrations/2026_04_03_000001_add_v72_fields_to_tracking_results.php
+	database/migrations/2026_04_03_000002_create_conflict_logs_table.php
+	database/migrations/2026_04_03_000003_create_fetch_cache_and_query_hashes_tables.php
+	database/migrations/2026_04_03_000004_expand_search_tier_enum.php
+	diff.txt
+	status.txt
+	status_utf8.txt
+
+no changes added to commit (use "git add" and/or "git commit -a")

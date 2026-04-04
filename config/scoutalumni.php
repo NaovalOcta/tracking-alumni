@@ -15,4 +15,9 @@ return [
         'auto_verify_threshold' => env('TRACKING_AUTO_VERIFY_THRESHOLD', 0.8),
         'needs_audit_threshold' => env('TRACKING_NEEDS_AUDIT_THRESHOLD', 0.5),
     ],
+
+    'identity_gate' => [
+        'reject_threshold'  => 0.70,
+        'strong_threshold'  => 0.85,
+    ],
 ];

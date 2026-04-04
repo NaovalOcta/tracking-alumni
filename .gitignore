@@ -1,5 +1,4 @@
 *.log
-*.md
 .DS_Store
 .env
 .env.backup
@@ -23,3 +22,12 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+Ringkasan Audit & Arsitektur ScoutAlumni.md
+Algoritma Pelacakan Alumni.md
+Technical Review Request from GPT.md
+ScoutAlumni_V4_Architecture.md
+ScoutAlumni_V5_Architecture.md
+ScoutAlumni_V6_Architecture.md
+ScoutAlumni_V7_Architecture.md
+ScoutAlumni_V7.1_Architecture.md
+ScoutAlumni_V7.2_Architecture.md

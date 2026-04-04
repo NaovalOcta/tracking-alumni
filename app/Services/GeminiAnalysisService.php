@@ -381,4 +381,169 @@ FORMAT JSON STRICT:
 }
 PROMPT;
     }
+
+    /**
+     * V7.2 Defensible Extraction Engine
+     * Zero-tolerance data extraction as requested by V7.2 Architecture
+     *
+     * @param array $evidences
+     * @param array $alumniData
+     * @return array
+     */
+    public function analyzeV72(array $evidences, array $alumniData): array
+    {
+        $defaultResult = [
+            'extracted_data' => [
+                'company' => null,
+                'position' => null,
+                'is_umm_alumni' => 'unknown',
+            ],
+            'social_signals' => [
+                'instagram' => [
+                    'url' => null,
+                    'has_company_mention' => false,
+                    'has_linkedin_link' => false,
+                ],
+            ],
+            'extracted_conflicts' => [],
+        ];
+
+        if (!$this->isConfigured()) {
+            Log::warning('GeminiAnalysisService: API key not configured for V7.2.');
+            return $defaultResult;
+        }
+
+        if (empty($evidences)) {
+            return $defaultResult;
+        }
+
+        $prompt = $this->buildV72ExtractionPrompt($evidences, $alumniData);
+        $maxRetries = 3;
+        $retryDelay = 2000;
+
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}";
+                $response = Http::timeout(30)->post($url, [
+                    'contents' => [['parts' => [['text' => $prompt]]]],
+                    'generationConfig' => [
+                        'responseMimeType' => 'application/json',
+                        'temperature' => 0.0, // Forced to absolute 0.0 for Zero-Tolerance Extraction
+                    ],
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    if (isset($data['error'])) {
+                        Log::error('GeminiAnalysisService V7.2: API returned error', ['error' => $data['error']]);
+                        return $defaultResult;
+                    }
+
+                    $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
+                    $parsed = json_decode($text, true);
+
+                    // Strictly parse and sanitize the JSON response with fallback schema
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
+                        return [
+                            'extracted_data' => [
+                                'company' => $parsed['extracted_data']['company'] ?? null,
+                                'position' => $parsed['extracted_data']['position'] ?? null,
+                                'is_umm_alumni' => $parsed['extracted_data']['is_umm_alumni'] ?? 'unknown',
+                            ],
+                            'social_signals' => [
+                                'instagram' => [
+                                    'url' => $parsed['social_signals']['instagram']['url'] ?? null,
+                                    'has_company_mention' => (bool) ($parsed['social_signals']['instagram']['has_company_mention'] ?? false),
+                                    'has_linkedin_link' => (bool) ($parsed['social_signals']['instagram']['has_linkedin_link'] ?? false),
+                                ],
+                            ],
+                            'extracted_conflicts' => is_array($parsed['extracted_conflicts'] ?? null) 
+                                ? $parsed['extracted_conflicts'] 
+                                : [],
+                        ];
+                    }
+
+                    Log::warning('GeminiAnalysisService V7.2: Failed to parse JSON safely', ['text' => $text]);
+                    return $defaultResult; // Automatically return default schema on parse error
+                }
+
+                if ($response->status() === 429 && $attempt < $maxRetries) {
+                    usleep($retryDelay * 1000);
+                    $retryDelay *= 2;
+                    continue;
+                }
+
+                Log::error('GeminiAnalysisService V7.2: API error HTTP ' . $response->status());
+                return $defaultResult;
+
+            } catch (\Exception $e) {
+                if ($attempt < $maxRetries) {
+                    usleep($retryDelay * 1000);
+                    $retryDelay *= 2;
+                    continue;
+                }
+                Log::error('GeminiAnalysisService V7.2: Exception', ['message' => $e->getMessage()]);
+                return $defaultResult;
+            }
+        }
+
+        return $defaultResult;
+    }
+
+    /**
+     * Build the EXACT V7.2 Prompt schema as provided in Architecture Document
+     */
+    protected function buildV72ExtractionPrompt(array $evidences, array $alumniData): string
+    {
+        $evidenceText = '';
+        foreach ($evidences as $i => $evidence) {
+            $num = $i + 1;
+            $sourceUrl = $evidence['source_url'] ?? 'Unknown URL';
+            $snippet = $evidence['raw_snippet'] ?? '';
+            $evidenceText .= "--- Snippet {$num} ---\nSource URL: {$sourceUrl}\nContent: {$snippet}\n\n";
+        }
+
+        $namaVariasi = !empty($alumniData['nama_variasi']) ? 'Alias: ' . implode(', ', $alumniData['nama_variasi']) : '';
+        $tahunLulus = $alumniData['tahun_lulus'] ?? 'Unspecified';
+
+        return <<<PROMPT
+TARGET ALUMNI PROFILE:
+- Name: {$alumniData['nama_lengkap']}
+- {$namaVariasi}
+- Major: {$alumniData['prodi']}
+- Graduation Year: {$tahunLulus}
+
+WEB EVIDENCES:
+{$evidenceText}
+You are a Zero-Tolerance Data Extraction Tool. Follow Evidence Hierarchies. Do NOT infer or complete fields.
+
+CRITICAL DIRECTIVES:
+1. Identify all companies mentioned across snippets. List them exactly as written.
+2. Provide explicit signal extraction for social media. If analyzing an IG/TikTok snippet, search specifically for Company Names or LinkedIn URLs within that snippet's text.
+3. If conflicts exist between snippets (e.g. Snippet 1 says "Shopee", Snippet 2 says "Tokopedia"), output BOTH with their respective source URLs into the array "extracted_conflicts".
+
+JSON SCHEMA EXPECTED:
+{
+  "extracted_data": {
+    "company": "<primary_ext_match_or_null>",
+    "position": "<primary_ext_match_or_null>",
+    "is_umm_alumni": "true|false|unknown"
+  },
+  "social_signals": {
+    "instagram": {
+       "url": "<url_or_null>",
+       "has_company_mention": true|false,
+       "has_linkedin_link": true|false
+    }
+  },
+  "extracted_conflicts": [
+     {
+        "field": "company",
+        "value": "<conflicting_value>",
+        "source_url": "<source_of_conflict>"
+     }
+  ]
+}
+PROMPT;
+    }
 }

@@ -33,12 +33,22 @@ class TrackingResult extends Model
         'ai_notes',
         'verified_by',
         'verified_at',
+        'identity_confidence',
+        'coverage_tier',
+        'coverage_details',
+        'manual_confidence',
+        'decision_trace',
+        'conflict_trace',
     ];
 
     protected $casts = [
         'confidence_score' => 'decimal:2',
+        'identity_confidence' => 'float',
         'is_umm_verified' => 'boolean',
         'verified_at' => 'datetime',
+        'coverage_details' => 'array',
+        'decision_trace' => 'array',
+        'conflict_trace' => 'array',
     ];
 
     public function alumni(): BelongsTo

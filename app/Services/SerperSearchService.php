@@ -11,11 +11,13 @@ class SerperSearchService
 {
     protected string $apiKey;
     protected int $dailyLimit;
+    protected ?FetchCacheService $fetchCache;
 
-    public function __construct()
+    public function __construct(?FetchCacheService $fetchCache = null)
     {
         $this->apiKey = config('scoutalumni.serper.api_key', '');
         $this->dailyLimit = config('scoutalumni.serper.daily_limit', 250);
+        $this->fetchCache = $fetchCache;
     }
 
     /**
@@ -141,6 +143,38 @@ class SerperSearchService
                         'error' => $errorMsg
                     ]);
                     $results[$query] = ['items' => [], 'totalResults' => 0];
+                }
+            }
+
+            // V7.2 STEP 4: Cache URLs and record queries via FetchCacheService
+            if ($this->fetchCache) {
+                foreach ($results as $queryStr => $resultData) {
+                    // Cache each result URL
+                    foreach ($resultData['items'] as $item) {
+                        if (!empty($item['link'])) {
+                            try {
+                                $this->fetchCache->cacheUrl($item['link'], [
+                                    'title'   => $item['title'] ?? '',
+                                    'snippet' => $item['snippet'] ?? '',
+                                ]);
+                            } catch (\Exception $e) {
+                                Log::warning('SerperSearchService: Failed to cache URL', [
+                                    'url' => $item['link'],
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+                    }
+
+                    // Record query for deduplication
+                    try {
+                        $this->fetchCache->recordQuery($queryStr, $resultData['totalResults']);
+                    } catch (\Exception $e) {
+                        Log::warning('SerperSearchService: Failed to record query', [
+                            'query' => $queryStr,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
             }
 

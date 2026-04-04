@@ -1,0 +1,1125 @@
+﻿diff --git a/.gitignore b/.gitignore
+index 7b74b38..6904ff3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,5 +1,4 @@
+ *.log
+-*.md
+ .DS_Store
+ .env
+ .env.backup
+@@ -23,3 +22,12 @@
+ Homestead.json
+ Homestead.yaml
+ Thumbs.db
++Ringkasan Audit & Arsitektur ScoutAlumni.md
++Algoritma Pelacakan Alumni.md
++Technical Review Request from GPT.md
++ScoutAlumni_V4_Architecture.md
++ScoutAlumni_V5_Architecture.md
++ScoutAlumni_V6_Architecture.md
++ScoutAlumni_V7_Architecture.md
++ScoutAlumni_V7.1_Architecture.md
++ScoutAlumni_V7.2_Architecture.md
+diff --git a/app/Http/Controllers/AuditController.php b/app/Http/Controllers/AuditController.php
+index 7d5b32b..61143f6 100644
+--- a/app/Http/Controllers/AuditController.php
++++ b/app/Http/Controllers/AuditController.php
+@@ -32,6 +32,10 @@ public function index(Request $request)
+      */
+     public function verify(Request $request, string $nim)
+     {
++        $request->validate([
++            'manual_confidence' => 'nullable|in:high,medium,low',
++        ]);
++
+         $alumni = Alumni::findOrFail($nim);
+         $result = $alumni->latestTrackingResult;
+ 
+@@ -40,10 +44,16 @@ public function verify(Request $request, string $nim)
+         }
+ 
+         // Update result with verification info
+-        $result->update([
++        $updateData = [
+             'verified_by' => Auth::id(),
+             'verified_at' => now(),
+-        ]);
++        ];
++
++        if ($request->has('manual_confidence') && $request->manual_confidence) {
++            $updateData['manual_confidence'] = $request->input('manual_confidence');
++        }
++
++        $result->update($updateData);
+ 
+         // Update alumni status
+         $alumni->update(['tracking_status' => 'auto_verified']); // Or use 'verified' if we want to distinguish
+@@ -52,7 +62,7 @@ public function verify(Request $request, string $nim)
+         TrackingHistory::create([
+             'alumni_nim' => $alumni->nim,
+             'snapshot_data' => $result->toArray(),
+-            'changed_reason' => 'Verifikasi manual oleh ' . Auth::user()->name,
++            'changed_reason' => 'Verifikasi manual oleh ' . Auth::user()->name . ($request->input('manual_confidence') ? ' (Confidence: ' . $request->input('manual_confidence') . ')' : ''),
+             'created_at' => now(),
+         ]);
+ 
+diff --git a/app/Models/TrackingResult.php b/app/Models/TrackingResult.php
+index 1fa7d26..336efc5 100644
+--- a/app/Models/TrackingResult.php
++++ b/app/Models/TrackingResult.php
+@@ -33,12 +33,22 @@ class TrackingResult extends Model
+         'ai_notes',
+         'verified_by',
+         'verified_at',
++        'identity_confidence',
++        'coverage_tier',
++        'coverage_details',
++        'manual_confidence',
++        'decision_trace',
++        'conflict_trace',
+     ];
+ 
+     protected $casts = [
+         'confidence_score' => 'decimal:2',
++        'identity_confidence' => 'float',
+         'is_umm_verified' => 'boolean',
+         'verified_at' => 'datetime',
++        'coverage_details' => 'array',
++        'decision_trace' => 'array',
++        'conflict_trace' => 'array',
+     ];
+ 
+     public function alumni(): BelongsTo
+diff --git a/app/Services/GeminiAnalysisService.php b/app/Services/GeminiAnalysisService.php
+index 6848123..638600d 100644
+--- a/app/Services/GeminiAnalysisService.php
++++ b/app/Services/GeminiAnalysisService.php
+@@ -379,6 +379,171 @@ protected function buildSocialMediaPrompt(array $evidences, array $context): str
+   "fb_url": "url facebook target jika valid (atau null)",
+   "tiktok_url": "url tiktok target jika valid (atau null)"
+ }
++PROMPT;
++    }
++
++    /**
++     * V7.2 Defensible Extraction Engine
++     * Zero-tolerance data extraction as requested by V7.2 Architecture
++     *
++     * @param array $evidences
++     * @param array $alumniData
++     * @return array
++     */
++    public function analyzeV72(array $evidences, array $alumniData): array
++    {
++        $defaultResult = [
++            'extracted_data' => [
++                'company' => null,
++                'position' => null,
++                'is_umm_alumni' => 'unknown',
++            ],
++            'social_signals' => [
++                'instagram' => [
++                    'url' => null,
++                    'has_company_mention' => false,
++                    'has_linkedin_link' => false,
++                ],
++            ],
++            'extracted_conflicts' => [],
++        ];
++
++        if (!$this->isConfigured()) {
++            Log::warning('GeminiAnalysisService: API key not configured for V7.2.');
++            return $defaultResult;
++        }
++
++        if (empty($evidences)) {
++            return $defaultResult;
++        }
++
++        $prompt = $this->buildV72ExtractionPrompt($evidences, $alumniData);
++        $maxRetries = 3;
++        $retryDelay = 2000;
++
++        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
++            try {
++                $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}";
++                $response = Http::timeout(30)->post($url, [
++                    'contents' => [['parts' => [['text' => $prompt]]]],
++                    'generationConfig' => [
++                        'responseMimeType' => 'application/json',
++                        'temperature' => 0.0, // Forced to absolute 0.0 for Zero-Tolerance Extraction
++                    ],
++                ]);
++
++                if ($response->successful()) {
++                    $data = $response->json();
++                    if (isset($data['error'])) {
++                        Log::error('GeminiAnalysisService V7.2: API returned error', ['error' => $data['error']]);
++                        return $defaultResult;
++                    }
++
++                    $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
++                    $parsed = json_decode($text, true);
++
++                    // Strictly parse and sanitize the JSON response with fallback schema
++                    if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
++                        return [
++                            'extracted_data' => [
++                                'company' => $parsed['extracted_data']['company'] ?? null,
++                                'position' => $parsed['extracted_data']['position'] ?? null,
++                                'is_umm_alumni' => $parsed['extracted_data']['is_umm_alumni'] ?? 'unknown',
++                            ],
++                            'social_signals' => [
++                                'instagram' => [
++                                    'url' => $parsed['social_signals']['instagram']['url'] ?? null,
++                                    'has_company_mention' => (bool) ($parsed['social_signals']['instagram']['has_company_mention'] ?? false),
++                                    'has_linkedin_link' => (bool) ($parsed['social_signals']['instagram']['has_linkedin_link'] ?? false),
++                                ],
++                            ],
++                            'extracted_conflicts' => is_array($parsed['extracted_conflicts'] ?? null) 
++                                ? $parsed['extracted_conflicts'] 
++                                : [],
++                        ];
++                    }
++
++                    Log::warning('GeminiAnalysisService V7.2: Failed to parse JSON safely', ['text' => $text]);
++                    return $defaultResult; // Automatically return default schema on parse error
++                }
++
++                if ($response->status() === 429 && $attempt < $maxRetries) {
++                    usleep($retryDelay * 1000);
++                    $retryDelay *= 2;
++                    continue;
++                }
++
++                Log::error('GeminiAnalysisService V7.2: API error HTTP ' . $response->status());
++                return $defaultResult;
++
++            } catch (\Exception $e) {
++                if ($attempt < $maxRetries) {
++                    usleep($retryDelay * 1000);
++                    $retryDelay *= 2;
++                    continue;
++                }
++                Log::error('GeminiAnalysisService V7.2: Exception', ['message' => $e->getMessage()]);
++                return $defaultResult;
++            }
++        }
++
++        return $defaultResult;
++    }
++
++    /**
++     * Build the EXACT V7.2 Prompt schema as provided in Architecture Document
++     */
++    protected function buildV72ExtractionPrompt(array $evidences, array $alumniData): string
++    {
++        $evidenceText = '';
++        foreach ($evidences as $i => $evidence) {
++            $num = $i + 1;
++            $sourceUrl = $evidence['source_url'] ?? 'Unknown URL';
++            $snippet = $evidence['raw_snippet'] ?? '';
++            $evidenceText .= "--- Snippet {$num} ---\nSource URL: {$sourceUrl}\nContent: {$snippet}\n\n";
++        }
++
++        $namaVariasi = !empty($alumniData['nama_variasi']) ? 'Alias: ' . implode(', ', $alumniData['nama_variasi']) : '';
++        $tahunLulus = $alumniData['tahun_lulus'] ?? 'Unspecified';
++
++        return <<<PROMPT
++TARGET ALUMNI PROFILE:
++- Name: {$alumniData['nama_lengkap']}
++- {$namaVariasi}
++- Major: {$alumniData['prodi']}
++- Graduation Year: {$tahunLulus}
++
++WEB EVIDENCES:
++{$evidenceText}
++You are a Zero-Tolerance Data Extraction Tool. Follow Evidence Hierarchies. Do NOT infer or complete fields.
++
++CRITICAL DIRECTIVES:
++1. Identify all companies mentioned across snippets. List them exactly as written.
++2. Provide explicit signal extraction for social media. If analyzing an IG/TikTok snippet, search specifically for Company Names or LinkedIn URLs within that snippet's text.
++3. If conflicts exist between snippets (e.g. Snippet 1 says "Shopee", Snippet 2 says "Tokopedia"), output BOTH with their respective source URLs into the array "extracted_conflicts".
++
++JSON SCHEMA EXPECTED:
++{
++  "extracted_data": {
++    "company": "<primary_ext_match_or_null>",
++    "position": "<primary_ext_match_or_null>",
++    "is_umm_alumni": "true|false|unknown"
++  },
++  "social_signals": {
++    "instagram": {
++       "url": "<url_or_null>",
++       "has_company_mention": true|false,
++       "has_linkedin_link": true|false
++    }
++  },
++  "extracted_conflicts": [
++     {
++        "field": "company",
++        "value": "<conflicting_value>",
++        "source_url": "<source_of_conflict>"
++     }
++  ]
++}
+ PROMPT;
+     }
+ }
+diff --git a/app/Services/SerperSearchService.php b/app/Services/SerperSearchService.php
+index cce37e1..54809fc 100644
+--- a/app/Services/SerperSearchService.php
++++ b/app/Services/SerperSearchService.php
+@@ -11,11 +11,13 @@ class SerperSearchService
+ {
+     protected string $apiKey;
+     protected int $dailyLimit;
++    protected ?FetchCacheService $fetchCache;
+ 
+-    public function __construct()
++    public function __construct(?FetchCacheService $fetchCache = null)
+     {
+         $this->apiKey = config('scoutalumni.serper.api_key', '');
+         $this->dailyLimit = config('scoutalumni.serper.daily_limit', 250);
++        $this->fetchCache = $fetchCache;
+     }
+ 
+     /**
+@@ -144,6 +146,38 @@ public function searchConcurrent(array $queries, int $maxResults = 3): array
+                 }
+             }
+ 
++            // V7.2 STEP 4: Cache URLs and record queries via FetchCacheService
++            if ($this->fetchCache) {
++                foreach ($results as $queryStr => $resultData) {
++                    // Cache each result URL
++                    foreach ($resultData['items'] as $item) {
++                        if (!empty($item['link'])) {
++                            try {
++                                $this->fetchCache->cacheUrl($item['link'], [
++                                    'title'   => $item['title'] ?? '',
++                                    'snippet' => $item['snippet'] ?? '',
++                                ]);
++                            } catch (\Exception $e) {
++                                Log::warning('SerperSearchService: Failed to cache URL', [
++                                    'url' => $item['link'],
++                                    'error' => $e->getMessage(),
++                                ]);
++                            }
++                        }
++                    }
++
++                    // Record query for deduplication
++                    try {
++                        $this->fetchCache->recordQuery($queryStr, $resultData['totalResults']);
++                    } catch (\Exception $e) {
++                        Log::warning('SerperSearchService: Failed to record query', [
++                            'query' => $queryStr,
++                            'error' => $e->getMessage(),
++                        ]);
++                    }
++                }
++            }
++
+             return $results;
+         } catch (\Exception $e) {
+             Log::error('SerperSearchService: Exception during concurrent search', [
+diff --git a/app/Services/TrackingService.php b/app/Services/TrackingService.php
+index 869e7fe..1272906 100644
+--- a/app/Services/TrackingService.php
++++ b/app/Services/TrackingService.php
+@@ -3,6 +3,7 @@
+ namespace App\Services;
+ 
+ use App\Models\Alumni;
++use App\Models\ConflictLog;
+ use App\Models\EvidenceLog;
+ use App\Models\SearchQuery;
+ use App\Models\TrackingResult;
+@@ -16,6 +17,9 @@ class TrackingService
+     protected QueryGeneratorService $queryGenerator;
+     protected SerperSearchService $serperSearch;
+     protected GeminiAnalysisService $geminiAnalysis;
++    protected FetchCacheService $fetchCache;
++    protected IdentityValidator $identityValidator;
++    protected PriorityResolverEngine $priorityResolver;
+ 
+     /**
+      * Minimum evidence count from Tier 1 (LinkedIn) to skip remaining tiers.
+@@ -26,29 +30,51 @@ public function __construct(
+         QueryGeneratorService $queryGenerator,
+         SerperSearchService $serperSearch,
+         GeminiAnalysisService $geminiAnalysis,
++        FetchCacheService $fetchCache,
++        IdentityValidator $identityValidator,
++        PriorityResolverEngine $priorityResolver,
+     ) {
+         $this->queryGenerator = $queryGenerator;
+         $this->serperSearch = $serperSearch;
+         $this->geminiAnalysis = $geminiAnalysis;
++        $this->fetchCache = $fetchCache;
++        $this->identityValidator = $identityValidator;
++        $this->priorityResolver = $priorityResolver;
+     }
+ 
+     /**
+-     * Track a single alumni: generate queries ΓåÆ search ΓåÆ analyze ΓåÆ store.
++     * Track a single alumni: V7.2 17-step pipeline.
++     *
++     * PIPELINE STEPS:
++     *  1. Mark alumni as sedang_dilacak
++     *  2. Generate queries via QueryGeneratorService
++     *  3. Query deduplication via FetchCacheService
++     *  4. Serper search + URL caching (handled inside SerperSearchService)
++     *  5. URL deduplication (existing)
++     *  6. Identity Gate (IdentityValidator)
++     *  7. V7.2 Gemini analysis (analyzeV72)
++     *  8. Priority Resolution (PriorityResolverEngine)
++     *  9. Mandatory Context Constraint (social URL nullification)
++     * 10. Social Media Discovery (Phase B) with Mandatory Context Constraint
++     * 11. Secondary Enrichment (instansi social media)
++     * 12. Coverage Details calculation
++     * 13. Final Reliability determination
++     * 14. Decision Trace assembly
++     * 15. Persist results
++     * 16. Status determination
++     * 17. Ambiguity Detection
+      *
+      * @return array{status: string, message: string}
+      */
+     public function trackAlumni(Alumni $alumni): array
+     {
+-        Log::info("TrackingService: Starting tracking for {$alumni->nim} - {$alumni->nama_lengkap}");
++        Log::info("TrackingService: Starting V7.2 tracking for {$alumni->nim} - {$alumni->nama_lengkap}");
+ 
+-        // Mark as in-progress
++        // ============================================================
++        // STEP 1: Mark alumni as in-progress (EXISTING ΓÇö PRESERVED)
++        // ============================================================
+         $alumni->update(['tracking_status' => 'sedang_dilacak']);
+ 
+-        $maxRetries = 2;
+-        $currentRetry = 0;
+-        $bestAnalysis = null;
+-        $allEvidenceFinal = [];
+-
+         $alumniData = [
+             'nim'           => $alumni->nim,
+             'nama_lengkap'  => $alumni->nama_lengkap,
+@@ -57,9 +83,23 @@ public function trackAlumni(Alumni $alumni): array
+             'tahun_lulus'   => $alumni->tahun_lulus,
+         ];
+ 
++        $decisionTrace = [
++            'accepted_signals' => [],
++            'rejected_signals' => [],
++            'ignored_signals'  => [],
++        ];
++
++        $maxRetries = 2;
++        $currentRetry = 0;
++        $allEvidenceFinal = [];
++        $queryStringsExecuted = [];
++
+         while ($currentRetry <= $maxRetries) {
+             $this->updateProgress($alumni->nim, 10 + ($currentRetry * 5), "Merumuskan strategi pencarian (Percobaan {$currentRetry})...");
+-            
++
++            // ============================================================
++            // STEP 2: Generate queries via QueryGeneratorService (EXISTING ΓÇö PRESERVED)
++            // ============================================================
+             try {
+                 $strategy = $this->queryGenerator->generate($alumni);
+                 $queries = $strategy['queries'] ?? [];
+@@ -68,7 +108,7 @@ public function trackAlumni(Alumni $alumni): array
+                 $queries = [];
+             }
+ 
+-            // Mutation logic for retries: broaden queries
++            // Mutation logic for retries: broaden queries (EXISTING ΓÇö PRESERVED)
+             if ($currentRetry > 0) {
+                 foreach ($queries as &$q) {
+                     $q['query'] = str_replace("\"{$alumni->prodi}\"", "", $q['query']);
+@@ -80,13 +120,39 @@ public function trackAlumni(Alumni $alumni): array
+                 break;
+             }
+ 
+-            $queryStrings = array_unique(array_column($queries, 'query'));
++            // ============================================================
++            // STEP 3: Query Deduplication via FetchCacheService (NEW)
++            // ============================================================
++            $filteredQueries = [];
++            foreach ($queries as $queryInfo) {
++                $qStr = $queryInfo['query'];
++                if ($this->fetchCache->isQueryDuplicate($qStr)) {
++                    Log::info("TrackingService: Query deduplicated (already run today): {$qStr}");
++                    $decisionTrace['ignored_signals'][] = "Query deduplicated: '{$qStr}' (same-day duplicate)";
++                    continue;
++                }
++                $filteredQueries[] = $queryInfo;
++            }
++
++            if (empty($filteredQueries)) {
++                Log::info("TrackingService: All queries deduplicated. Skipping search.");
++                $currentRetry++;
++                continue;
++            }
++
++            $queryStrings = array_unique(array_column($filteredQueries, 'query'));
+             $this->updateProgress($alumni->nim, 30, "Mengeksekusi " . count($queryStrings) . " query paralel...");
+-            
++
++            // ============================================================
++            // STEP 4: Serper Search + URL Caching (MODIFIED ΓÇö caching handled inside SerperSearchService)
++            // ============================================================
+             $concurrentResults = $this->serperSearch->searchConcurrent($queryStrings, 3);
+-            
++
++            // ============================================================
++            // STEP 5: URL Deduplication (EXISTING ΓÇö PRESERVED)
++            // ============================================================
+             $allEvidence = [];
+-            foreach ($queries as $queryInfo) {
++            foreach ($filteredQueries as $queryInfo) {
+                 $qStr = $queryInfo['query'];
+                 $searchResults = $concurrentResults[$qStr] ?? ['items' => [], 'totalResults' => 0];
+ 
+@@ -115,81 +181,213 @@ public function trackAlumni(Alumni $alumni): array
+                 continue;
+             }
+ 
+-            $this->updateProgress($alumni->nim, 60, "Fase A: Menganalisis hasil pencarian dengan Gemini AI...");
+-            $analysis = $this->geminiAnalysis->analyze($allEvidence, $alumniData);
++            $allEvidenceFinal = $allEvidence;
++            break; // Evidence found, exit retry loop
++        }
+ 
+-            // Post-validation: cek UMM affiliation check
+-            if (isset($analysis['is_umm_verified']) && $analysis['is_umm_verified'] === false) {
+-                $analysis['confidence'] = min($analysis['confidence'], 0.30);
+-                Log::warning("TrackingService: UMM affiliation NOT verified for {$alumni->nim}. Capping confidence.");
+-            }
++        // No evidence found after retries
++        if (empty($allEvidenceFinal)) {
++            $alumni->update(['tracking_status' => 'not_found', 'last_tracked_at' => now()]);
++            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence di web.'];
++        }
+ 
+-            // Post-validation: URL LinkedIn valid format profil
+-            if (!empty($analysis['linkedin_url'])) {
+-                if (!preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $analysis['linkedin_url'])) {
+-                    $analysis['linkedin_url'] = null;
+-                }
+-            }
++        // ============================================================
++        // STEP 6: Identity Gate (NEW ΓÇö IdentityValidator)
++        // V7.2 ┬ºB.1, ┬ºC.1, ┬ºD.1
++        // ============================================================
++        $this->updateProgress($alumni->nim, 45, "V7.2: Validasi identitas alumni...");
++
++        // Prepare evidence format for IdentityValidator (expects 'url', 'title', 'snippet')
++        $identityEvidence = array_map(function ($ev) {
++            return [
++                'url'     => $ev['source_url'],
++                'title'   => '',
++                'snippet' => $ev['raw_snippet'],
++            ];
++        }, $allEvidenceFinal);
++
++        $identityResult = $this->identityValidator->validate($alumniData, $identityEvidence);
++        $identityConfidence = $identityResult['identity_confidence'];
++        $gateStatus = $identityResult['gate_status'];
++
++        Log::info("TrackingService: Identity gate result for {$alumni->nim}: score={$identityConfidence}, gate={$gateStatus}");
++
++        $rejectThreshold = config('scoutalumni.identity_gate.reject_threshold', 0.70);
++        $strongThreshold = config('scoutalumni.identity_gate.strong_threshold', 0.85);
++
++        // STEP 6a: Identity gate SHORT-CIRCUIT for REJECT (<0.70)
++        if ($identityConfidence < $rejectThreshold) {
++            Log::warning("TrackingService: Identity REJECTED for {$alumni->nim}. Score: {$identityConfidence}. No Gemini call.");
++
++            $decisionTrace['rejected_signals'][] = "Identity gate REJECTED: score {$identityConfidence} < {$rejectThreshold}. Pipeline aborted.";
++
++            // Save result with rejection metadata
++            TrackingResult::updateOrCreate(
++                ['alumni_nim' => $alumni->nim],
++                [
++                    'identity_confidence' => $identityConfidence,
++                    'confidence_score'    => 0.0,
++                    'decision_trace'      => $decisionTrace,
++                    'ai_notes'            => "Identity gate rejected. Score: {$identityConfidence}. Signals: " . json_encode($identityResult['signals']),
++                    'source_type'         => 'serper_gemini',
++                ]
++            );
+ 
+-            if ($bestAnalysis === null || $analysis['confidence'] > $bestAnalysis['confidence']) {
+-                $bestAnalysis = $analysis;
+-                $allEvidenceFinal = $allEvidence;
++            // Save evidence logs even on rejection
++            foreach ($allEvidenceFinal as $evidence) {
++                EvidenceLog::create([
++                    'alumni_nim'  => $alumni->nim,
++                    'source_type' => $evidence['source_type'],
++                    'source_url'  => $evidence['source_url'],
++                    'raw_snippet' => substr($evidence['raw_snippet'], 0, 1000),
++                    'searched_at' => now(),
++                ]);
+             }
+ 
+-            if ($bestAnalysis['confidence'] >= 0.70) {
+-                break;
+-            }
++            $alumni->update(['tracking_status' => 'not_found', 'last_tracked_at' => now()]);
++
++            $this->updateProgress($alumni->nim, 100, "Identity gate: REJECTED (score {$identityConfidence})");
+ 
+-            Log::info("TrackingService: Confidence {$analysis['confidence']} < 0.70. Retrying...");
+-            $currentRetry++;
+-            sleep(3);
++            return [
++                'status'     => 'not_found',
++                'message'    => "Identity gate REJECTED. Score: {$identityConfidence}",
++                'confidence' => 0.0,
++            ];
+         }
+ 
+-        if ($bestAnalysis === null) {
+-            $alumni->update(['tracking_status' => 'not_found', 'last_tracked_at' => now()]);
+-            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence di web.'];
++        // STEP 6b: Determine reliability cap based on gate status
++        $reliabilityCap = null; // No cap for STRONG
++        if ($identityConfidence < $strongThreshold) {
++            $reliabilityCap = 'medium'; // WEAK identity ΓåÆ cap at medium
++            $decisionTrace['accepted_signals'][] = "Identity gate WEAK: score {$identityConfidence}. Reliability capped at 'medium'.";
++        } else {
++            $decisionTrace['accepted_signals'][] = "Identity gate STRONG: score {$identityConfidence}. No reliability cap.";
+         }
+ 
+-        foreach ($allEvidenceFinal as $evidence) {
+-            EvidenceLog::create([
+-                'alumni_nim'  => $alumni->nim,
+-                'source_type' => $evidence['source_type'],
+-                'source_url'  => $evidence['source_url'],
+-                'raw_snippet' => substr($evidence['raw_snippet'], 0, 1000),
+-                'searched_at' => now(),
+-            ]);
++        // ============================================================
++        // STEP 7: V7.2 Gemini Analysis (MODIFIED ΓÇö uses analyzeV72)
++        // ============================================================
++        $this->updateProgress($alumni->nim, 55, "V7.2: Analisis Gemini Zero-Tolerance...");
++
++        $geminiResult = $this->geminiAnalysis->analyzeV72($allEvidenceFinal, $alumniData);
++
++        $extractedData = $geminiResult['extracted_data'] ?? [];
++        $socialSignals = $geminiResult['social_signals'] ?? [];
++        $extractedConflicts = $geminiResult['extracted_conflicts'] ?? [];
++
++        Log::info("TrackingService: Gemini V7.2 result for {$alumni->nim}", [
++            'company'   => $extractedData['company'] ?? null,
++            'position'  => $extractedData['position'] ?? null,
++            'conflicts' => count($extractedConflicts),
++        ]);
++
++        // ============================================================
++        // STEP 8: Priority Resolution (NEW ΓÇö PriorityResolverEngine)
++        // V7.2 ┬ºB.2, ┬ºC.3
++        // ============================================================
++        $this->updateProgress($alumni->nim, 65, "V7.2: Menyelesaikan konflik data via hierarki...");
++
++        $resolverResult = $this->priorityResolver->resolve($geminiResult, $allEvidenceFinal);
++        $resolvedData = $resolverResult['resolved_data'] ?? $extractedData;
++        $conflictTrace = $resolverResult['conflict_trace'] ?? [];
++        $conflictPenalty = $resolverResult['penalties_applied'] ?? 0.0;
++
++        // Persist each conflict into conflict_logs table
++        foreach ($conflictTrace as $conflict) {
++            try {
++                ConflictLog::create([
++                    'alumni_nim'        => $alumni->nim,
++                    'field_name'        => $conflict['field'],
++                    'rejected_values'   => $conflict['rejected_values'] ?? [],
++                    'resolution_reason' => $conflict['resolution_reason'] ?? '',
++                    'created_at'        => now(),
++                ]);
++            } catch (\Exception $e) {
++                Log::warning("TrackingService: Failed to create ConflictLog for {$alumni->nim}", [
++                    'field' => $conflict['field'],
++                    'error' => $e->getMessage(),
++                ]);
++            }
++        }
++
++        if ($conflictPenalty > 0) {
++            $decisionTrace['accepted_signals'][] = "Conflict penalty applied: -{$conflictPenalty} (from " . count($conflictTrace) . " conflicts)";
++        }
++
++        // ============================================================
++        // STEP 9: Mandatory Context Constraint ┬ºC.2 (NEW)
++        // Social URL nullification if no company mention AND no LinkedIn link
++        // ============================================================
++        $platforms = ['instagram', 'facebook', 'tiktok'];
++        foreach ($platforms as $platform) {
++            $signal = $socialSignals[$platform] ?? null;
++            if ($signal && !empty($signal['url'])) {
++                $hasCompanyMention = (bool) ($signal['has_company_mention'] ?? false);
++                $hasLinkedinLink = (bool) ($signal['has_linkedin_link'] ?? false);
++
++                if (!$hasCompanyMention && !$hasLinkedinLink) {
++                    Log::info("TrackingService: Mandatory Context Constraint ΓÇö {$platform} URL nullified for {$alumni->nim}");
++                    $socialSignals[$platform]['url'] = null;
++                    $decisionTrace['rejected_signals'][] = "Mandatory Context Constraint: {$platform} URL rejected ΓÇö no company mention AND no LinkedIn link in profile";
++                } else {
++                    $decisionTrace['accepted_signals'][] = "{$platform} URL accepted ΓÇö " .
++                        ($hasCompanyMention ? "has company mention" : "") .
++                        ($hasCompanyMention && $hasLinkedinLink ? " + " : "") .
++                        ($hasLinkedinLink ? "has LinkedIn link" : "");
++                }
++            }
+         }
+ 
+-        // FASE B: Social Media Discovery
++        // ============================================================
++        // STEP 10: Social Media Discovery ΓÇö Phase B (EXISTING ΓÇö MODIFIED)
++        // Gated on confidence >= 0.50, applies Mandatory Context Constraint
++        // ============================================================
+         $sosmedAlumni = [
+-            'ig_url'     => null,
+-            'fb_url'     => null,
+-            'tiktok_url' => null
++            'ig_url'     => $socialSignals['instagram']['url'] ?? null,
++            'fb_url'     => $socialSignals['facebook']['url'] ?? null,
++            'tiktok_url' => $socialSignals['tiktok']['url'] ?? null,
+         ];
+ 
+-        if ($bestAnalysis['confidence'] >= 0.50) {
++        // Use resolved data for social discovery context
++        $instansi = $resolvedData['company'] ?? null;
++        $lokasi = $extractedData['location'] ?? null;
++
++        // Build a preliminary confidence for Phase B gating
++        // Use 0.60 as base since we passed identity gate
++        $preliminaryConfidence = 0.60;
++
++        if ($preliminaryConfidence >= 0.50) {
+             $this->updateProgress($alumni->nim, 75, "Fase B: Penemuan media sosial berbasis identitas...");
+-            
+-            // Extract username if possible
++
++            // Extract LinkedIn URL from resolved/extracted data
++            $linkedinUrl = $resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null;
++
++            // Post-validation: LinkedIn URL format
++            if (!empty($linkedinUrl)) {
++                if (!preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $linkedinUrl)) {
++                    $linkedinUrl = null;
++                }
++            }
++
+             $linkedinUsername = null;
+-            if (!empty($bestAnalysis['linkedin_url'])) {
+-                $parts = explode('/in/', $bestAnalysis['linkedin_url']);
++            if (!empty($linkedinUrl)) {
++                $parts = explode('/in/', $linkedinUrl);
+                 if (count($parts) > 1) {
+                     $linkedinUsername = trim(explode('?', $parts[1])[0], '/');
+                 }
+             }
+ 
+             $sosmedQueries = $this->queryGenerator->generateSocialMediaQueries(
+-                $alumni->nama_lengkap, 
+-                $linkedinUsername, 
+-                $bestAnalysis['instansi'], 
+-                $bestAnalysis['lokasi']
++                $alumni->nama_lengkap,
++                $linkedinUsername,
++                $instansi,
++                $lokasi
+             );
+ 
+             if (!empty($sosmedQueries)) {
+                 $sosmedQueryStrings = array_unique(array_column($sosmedQueries, 'query'));
+                 $sosmedResults = $this->serperSearch->searchConcurrent($sosmedQueryStrings, 3);
+-                
++
+                 $sosmedEvidence = [];
+                 foreach ($sosmedQueries as $queryInfo) {
+                     $qStr = $queryInfo['query'];
+@@ -200,7 +398,7 @@ public function trackAlumni(Alumni $alumni): array
+                         'results_count' => $sosmedResults[$qStr]['totalResults'] ?? 0,
+                         'searched_at'   => now(),
+                     ]);
+-                    
++
+                     foreach ($sosmedResults[$qStr]['items'] ?? [] as $item) {
+                         $sosmedEvidence[] = [
+                             'source_url'  => $item['link'],
+@@ -211,22 +409,36 @@ public function trackAlumni(Alumni $alumni): array
+                 }
+ 
+                 if (!empty($sosmedEvidence)) {
+-                    $sosmedAlumni = $this->geminiAnalysis->analyzeSocialMedia($sosmedEvidence, [
++                    $sosmedAnalysis = $this->geminiAnalysis->analyzeSocialMedia($sosmedEvidence, [
+                         'nama' => $alumni->nama_lengkap,
+-                        'instansi' => $bestAnalysis['instansi'],
+-                        'lokasi' => $bestAnalysis['lokasi']
++                        'instansi' => $instansi,
++                        'lokasi' => $lokasi,
+                     ]);
++
++                    // Apply Mandatory Context Constraint to Phase B social results
++                    // If analyzeSocialMedia returned URLs, they must pass context check
++                    // (analyzeSocialMedia already applies multi-signal matching, so we accept its results)
++                    if (!empty($sosmedAnalysis['ig_url'])) {
++                        $sosmedAlumni['ig_url'] = $sosmedAlumni['ig_url'] ?? $sosmedAnalysis['ig_url'];
++                    }
++                    if (!empty($sosmedAnalysis['fb_url'])) {
++                        $sosmedAlumni['fb_url'] = $sosmedAlumni['fb_url'] ?? $sosmedAnalysis['fb_url'];
++                    }
++                    if (!empty($sosmedAnalysis['tiktok_url'])) {
++                        $sosmedAlumni['tiktok_url'] = $sosmedAlumni['tiktok_url'] ?? $sosmedAnalysis['tiktok_url'];
++                    }
+                 }
+             }
+         }
+ 
+-        // Secondary Enrichment (Instansi)
+-        $instansi = $bestAnalysis['instansi'];
++        // ============================================================
++        // STEP 11: Secondary Enrichment (Instansi) (EXISTING ΓÇö PRESERVED)
++        // ============================================================
+         $sosmedInstansi = [
+             'linkedin' => null,
+             'ig' => null,
+             'fb' => null,
+-            'tiktok' => null
++            'tiktok' => null,
+         ];
+ 
+         if (!empty($instansi) && $instansi !== 'null') {
+@@ -234,7 +446,7 @@ public function trackAlumni(Alumni $alumni): array
+             $enrichQuery = "\"{$instansi}\" site:linkedin.com/company OR site:instagram.com OR site:facebook.com OR site:tiktok.com";
+             $enrichResult = $this->serperSearch->searchConcurrent([$enrichQuery], 4);
+             $items = $enrichResult[$enrichQuery]['items'] ?? [];
+-            
++
+             foreach ($items as $item) {
+                 $url = collect(explode('?', $item['link']))->first(); // clean params
+                 if (empty($sosmedInstansi['linkedin']) && str_contains($url, 'linkedin.com/company/')) {
+@@ -249,61 +461,231 @@ public function trackAlumni(Alumni $alumni): array
+             }
+         }
+ 
+-        $confidence = $bestAnalysis['confidence'];
+-        $autoVerifyThreshold = config('scoutalumni.tracking.auto_verify_threshold', 0.8);
+-        $needsAuditThreshold = config('scoutalumni.tracking.needs_audit_threshold', 0.5);
++        // ============================================================
++        // STEP 12: Coverage Details + Coverage Tier (NEW)
++        // V7.2 ┬ºE coverage_detail
++        // ============================================================
++        $linkedinUrl = $resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null;
++        // Post-validation: LinkedIn URL format
++        if (!empty($linkedinUrl) && !preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $linkedinUrl)) {
++            $linkedinUrl = null;
++        }
+ 
+-        if ($confidence >= $autoVerifyThreshold) {
+-            $newStatus = 'auto_verified';
+-        } elseif ($confidence >= $needsAuditThreshold) {
+-            $newStatus = 'needs_audit';
++        $coverageDetails = [
++            'linkedin'  => !empty($linkedinUrl),
++            'company'   => !empty($resolvedData['company'] ?? null),
++            'position'  => !empty($resolvedData['position'] ?? null),
++            'instagram' => !empty($sosmedAlumni['ig_url']),
++            'email'     => !empty($resolvedData['email'] ?? null),
++        ];
++
++        $fieldsCovered = count(array_filter($coverageDetails));
++
++        if ($fieldsCovered >= 4) {
++            $coverageTier = 'high';
++        } elseif ($fieldsCovered >= 3) {
++            $coverageTier = 'medium';
+         } else {
+-            $newStatus = 'not_found';
++            $coverageTier = 'low';
++        }
++
++        // ============================================================
++        // STEP 13: Final Reliability Determination (NEW)
++        // ============================================================
++
++        // Start with base confidence from coverage
++        $confidence = $this->calculateBaseConfidence($resolvedData, $coverageDetails, $identityConfidence);
++
++        // 13a: Apply UMM verification penalty (EXISTING logic)
++        $isUmmAlumni = $resolvedData['is_umm_alumni'] ?? $extractedData['is_umm_alumni'] ?? 'unknown';
++        if ($isUmmAlumni === 'false' || $isUmmAlumni === false) {
++            $confidence = min($confidence, 0.30);
++            Log::warning("TrackingService: UMM affiliation NOT verified for {$alumni->nim}. Capping confidence.");
++            $decisionTrace['rejected_signals'][] = "UMM affiliation NOT verified ΓÇö confidence capped at 0.30";
++        }
++
++        // 13b: Apply conflict penalties from STEP 8
++        $confidence = max(0.0, $confidence - $conflictPenalty);
++
++        // 13c: Apply identity gate cap (WEAK ΓåÆ max 'medium')
++        $reliability = 'low';
++        if ($confidence >= 0.80) {
++            $reliability = 'high';
++        } elseif ($confidence >= 0.50) {
++            $reliability = 'medium';
+         }
+ 
+-        // Save tracking result
++        // Apply WEAK identity cap: force reliability to max 'medium'
++        if ($reliabilityCap === 'medium' && $reliability === 'high') {
++            $reliability = 'medium';
++            $decisionTrace['accepted_signals'][] = "Reliability downgraded from 'high' to 'medium' due to WEAK identity gate";
++        }
++
++        // ============================================================
++        // STEP 14: Decision Trace Assembly (NEW ΓÇö ┬ºE)
++        // ============================================================
++        // Decision trace has been built incrementally throughout the pipeline.
++        // Final assembly with metadata:
++        $decisionTrace['identity_gate'] = [
++            'score'  => $identityConfidence,
++            'status' => $gateStatus,
++            'signals' => $identityResult['signals'],
++        ];
++        $decisionTrace['coverage'] = [
++            'tier'    => $coverageTier,
++            'details' => $coverageDetails,
++            'fields_covered' => $fieldsCovered,
++        ];
++        $decisionTrace['reliability'] = $reliability;
++        $decisionTrace['conflict_penalty'] = $conflictPenalty;
++
++        // ============================================================
++        // STEP 15: Persist Results (MODIFIED ΓÇö includes V7.2 fields)
++        // ============================================================
++        $this->updateProgress($alumni->nim, 90, "Menyimpan hasil tracking...");
++
++        // Save evidence logs
++        foreach ($allEvidenceFinal as $evidence) {
++            EvidenceLog::create([
++                'alumni_nim'  => $alumni->nim,
++                'source_type' => $evidence['source_type'],
++                'source_url'  => $evidence['source_url'],
++                'raw_snippet' => substr($evidence['raw_snippet'], 0, 1000),
++                'searched_at' => now(),
++            ]);
++        }
++
++        // Map resolved/extracted data to TrackingResult fields
+         $result = TrackingResult::updateOrCreate(
+             ['alumni_nim' => $alumni->nim],
+             [
+-                'jabatan'          => $bestAnalysis['jabatan'],
+-                'instansi'         => $bestAnalysis['instansi'],
+-                'kategori_pekerjaan'=> $bestAnalysis['kategori_pekerjaan'],
+-                'tipe_posisi'      => $bestAnalysis['tipe_posisi'] ?? null,
+-                'posisi_sejak'     => $bestAnalysis['posisi_sejak'] ?? null,
+-                'lokasi'           => $bestAnalysis['lokasi'],
+-                'linkedin_url'     => $bestAnalysis['linkedin_url'],
++                'jabatan'          => $resolvedData['position'] ?? null,
++                'instansi'         => $resolvedData['company'] ?? null,
++                'kategori_pekerjaan'=> $extractedData['kategori_pekerjaan'] ?? null,
++                'tipe_posisi'      => $extractedData['tipe_posisi'] ?? null,
++                'posisi_sejak'     => $extractedData['posisi_sejak'] ?? null,
++                'lokasi'           => $extractedData['location'] ?? null,
++                'linkedin_url'     => $linkedinUrl,
+                 'ig_url'           => $sosmedAlumni['ig_url'] ?? null,
+                 'fb_url'           => $sosmedAlumni['fb_url'] ?? null,
+                 'tiktok_url'       => $sosmedAlumni['tiktok_url'] ?? null,
+-                'email'            => $bestAnalysis['email'],
+-                'no_hp'            => $bestAnalysis['no_hp'],
+-                'is_umm_verified'  => $bestAnalysis['is_umm_verified'] ?? false,
+-                'umm_evidence'     => $bestAnalysis['umm_evidence'] ?? null,
++                'email'            => $resolvedData['email'] ?? null,
++                'no_hp'            => $resolvedData['phone'] ?? null,
++                'is_umm_verified'  => ($isUmmAlumni === 'true' || $isUmmAlumni === true),
++                'umm_evidence'     => $extractedData['umm_evidence'] ?? null,
+                 'sosmed_instansi_linkedin' => $sosmedInstansi['linkedin'],
+                 'sosmed_instansi_ig'       => $sosmedInstansi['ig'],
+                 'sosmed_instansi_fb'       => $sosmedInstansi['fb'],
+                 'sosmed_instansi_tiktok'   => $sosmedInstansi['tiktok'],
+-                'confidence_score' => $confidence,
+-                'ai_notes'         => trim(($bestAnalysis['notes'] ?? '') . "\n" . ($bestAnalysis['catatan_posisi'] ?? '')),
+-                'source_type'      => 'serper_gemini',
++                'confidence_score'    => $confidence,
++                'ai_notes'            => "V7.2 Pipeline | Identity: {$gateStatus} ({$identityConfidence}) | Coverage: {$coverageTier} ({$fieldsCovered}/5) | Penalty: {$conflictPenalty}",
++                'source_type'         => 'serper_gemini',
++                // V7.2 new fields
++                'identity_confidence' => $identityConfidence,
++                'coverage_tier'       => $coverageTier,
++                'coverage_details'    => $coverageDetails,
++                'decision_trace'      => $decisionTrace,
++                'conflict_trace'      => $conflictTrace,
+             ]
+         );
+         $result->touch();
+ 
++        // Save tracking history snapshot
+         TrackingHistory::create([
+-            'alumni_nim'    => $alumni->nim,
+-            'snapshot_data' => array_merge($bestAnalysis, ['sosmed_instansi' => $sosmedInstansi]),
+-            'changed_reason' => 'Tracking otomatis - confidence: ' . round($confidence * 100) . '%',
+-            'created_at'    => now(),
++            'alumni_nim'     => $alumni->nim,
++            'snapshot_data'  => array_merge(
++                $resolvedData,
++                ['sosmed_instansi' => $sosmedInstansi],
++                ['identity_confidence' => $identityConfidence],
++                ['coverage_tier' => $coverageTier],
++                ['coverage_details' => $coverageDetails],
++                ['conflict_trace' => $conflictTrace],
++            ),
++            'changed_reason' => 'V7.2 Tracking otomatis - confidence: ' . round($confidence * 100) . '% | Identity: ' . $gateStatus,
++            'created_at'     => now(),
+         ]);
+ 
++        // ============================================================
++        // STEP 16: Status Determination (EXISTING ΓÇö MODIFIED with V7.2 reliability caps)
++        // ============================================================
++        $autoVerifyThreshold = config('scoutalumni.tracking.auto_verify_threshold', 0.8);
++        $needsAuditThreshold = config('scoutalumni.tracking.needs_audit_threshold', 0.5);
++
++        if ($confidence >= $autoVerifyThreshold) {
++            $newStatus = 'auto_verified';
++        } elseif ($confidence >= $needsAuditThreshold) {
++            $newStatus = 'needs_audit';
++        } else {
++            $newStatus = 'not_found';
++        }
++
++        // Apply reliability cap to status
++        if ($reliabilityCap === 'medium' && $newStatus === 'auto_verified') {
++            $newStatus = 'needs_audit';
++            $decisionTrace['accepted_signals'][] = "Status downgraded from 'auto_verified' to 'needs_audit' due to WEAK identity gate";
++
++            // Update decision trace in result
++            $result->update(['decision_trace' => $decisionTrace]);
++        }
++
++        // ============================================================
++        // STEP 17: Ambiguity Detection ┬ºD.2 (NEW)
++        // ============================================================
++        $ambiguousIdentity = false;
++        if (!empty($extractedConflicts)) {
++            // Check for multiple valid candidates: same name, different companies, both high-rank sources
++            $companyConflicts = collect($extractedConflicts)->filter(function ($conflict) {
++                return ($conflict['field'] ?? '') === 'company';
++            });
++
++            if ($companyConflicts->count() > 0) {
++                // Check if conflicting sources are both high-rank (rank <= 3)
++                foreach ($companyConflicts as $conflict) {
++                    $conflictUrl = $conflict['conflicting_source_url'] ?? $conflict['source_url'] ?? '';
++                    $primaryUrl = $conflict['primary_source_url'] ?? '';
++
++                    if (!empty($conflictUrl)) {
++                        $conflictType = $this->priorityResolver->classifySource($conflictUrl);
++                        $conflictRank = PriorityResolverEngine::HIERARCHY[$conflictType] ?? 4;
++
++                        $primaryRank = 4;
++                        if (!empty($primaryUrl)) {
++                            $primaryType = $this->priorityResolver->classifySource($primaryUrl);
++                            $primaryRank = PriorityResolverEngine::HIERARCHY[$primaryType] ?? 4;
++                        }
++
++                        // Both high-rank sources (rank <= 3) with different companies ΓåÆ ambiguous
++                        if ($conflictRank <= 3 && $primaryRank <= 3) {
++                            $ambiguousIdentity = true;
++                            break;
++                        }
++                    }
++                }
++            }
++        }
++
++        if ($ambiguousIdentity) {
++            $newStatus = 'needs_audit';
++            $decisionTrace['ambiguous_identity'] = true;
++            $decisionTrace['rejected_signals'][] = "Ambiguous identity detected: multiple high-rank sources with conflicting company data. Manual verification required.";
++
++            Log::warning("TrackingService: Ambiguous identity for {$alumni->nim}. Requires manual verification.");
++
++            // Update result with ambiguity flag
++            $result->update([
++                'decision_trace' => $decisionTrace,
++                'manual_confidence' => null, // Requires admin input
++            ]);
++        }
++
++        // Final status update
+         $alumni->update([
+             'tracking_status' => $newStatus,
+             'last_tracked_at' => now(),
+         ]);
+ 
+         $this->updateProgress($alumni->nim, 100, "Selesai! Status: {$newStatus}");
+-        Log::info("TrackingService: Completed {$alumni->nim} ΓÇö status: {$newStatus}, confidence: {$confidence}");
++        Log::info("TrackingService: Completed {$alumni->nim} ΓÇö status: {$newStatus}, confidence: {$confidence}, identity: {$identityConfidence}, coverage: {$coverageTier}");
+ 
+         return [
+             'status'     => $newStatus,
+@@ -312,6 +694,32 @@ public function trackAlumni(Alumni $alumni): array
+         ];
+     }
+ 
++    /**
++     * Calculate base confidence from resolved data and coverage.
++     */
++    protected function calculateBaseConfidence(array $resolvedData, array $coverageDetails, float $identityConfidence): float
++    {
++        $fieldsCovered = count(array_filter($coverageDetails));
++
++        // Base confidence from field coverage
++        $coverageScore = $fieldsCovered / 5.0; // 5 key fields
++
++        // Weighted combination: identity confidence + coverage
++        $confidence = (0.6 * $identityConfidence) + (0.4 * $coverageScore);
++
++        // Boost if LinkedIn found (strong signal)
++        if ($coverageDetails['linkedin'] ?? false) {
++            $confidence = min(1.0, $confidence + 0.10);
++        }
++
++        // Boost if company found
++        if ($coverageDetails['company'] ?? false) {
++            $confidence = min(1.0, $confidence + 0.05);
++        }
++
++        return round(min(1.0, $confidence), 4);
++    }
++
+     /**
+      * Check if required APIs are configured.
+      */
+@@ -357,7 +765,7 @@ protected function mapTierToSourceType(string $tier, string $url): string
+     private function containsContextualKeywords(string $text, array $keywords): bool
+     {
+         $text = strtolower($text);
+-        
++
+         foreach ($keywords as $keyword) {
+             $keyword = strtolower(trim($keyword));
+             if ($keyword && str_contains($text, $keyword)) {
+diff --git a/config/scoutalumni.php b/config/scoutalumni.php
+index bf9f486..e8db18f 100644
+--- a/config/scoutalumni.php
++++ b/config/scoutalumni.php
+@@ -15,4 +15,9 @@
+         'auto_verify_threshold' => env('TRACKING_AUTO_VERIFY_THRESHOLD', 0.8),
+         'needs_audit_threshold' => env('TRACKING_NEEDS_AUDIT_THRESHOLD', 0.5),
+     ],
++
++    'identity_gate' => [
++        'reject_threshold'  => 0.70,
++        'strong_threshold'  => 0.85,
++    ],
+ ];
