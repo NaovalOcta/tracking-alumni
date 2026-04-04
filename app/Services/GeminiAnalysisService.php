@@ -396,14 +396,13 @@ PROMPT;
             'extracted_data' => [
                 'company' => null,
                 'position' => null,
+                'linkedin_url' => null,
                 'is_umm_alumni' => 'unknown',
             ],
             'social_signals' => [
-                'instagram' => [
-                    'url' => null,
-                    'has_company_mention' => false,
-                    'has_linkedin_link' => false,
-                ],
+                'instagram' => ['url' => null],
+                'facebook' => ['url' => null],
+                'tiktok' => ['url' => null],
             ],
             'extracted_conflicts' => [],
             'alasan_analisis' => 'Tidak ada catatan analisis eksplisit.',
@@ -449,6 +448,7 @@ PROMPT;
                             'extracted_data' => [
                                 'company' => $parsed['extracted_data']['company'] ?? null,
                                 'position' => $parsed['extracted_data']['position'] ?? null,
+                                'linkedin_url' => $parsed['extracted_data']['linkedin_url'] ?? null,
                                 'is_umm_alumni' => $parsed['extracted_data']['is_umm_alumni'] ?? 'unknown',
                             ],
                             'social_signals' => [
@@ -456,6 +456,12 @@ PROMPT;
                                     'url' => $parsed['social_signals']['instagram']['url'] ?? null,
                                     'has_company_mention' => (bool) ($parsed['social_signals']['instagram']['has_company_mention'] ?? false),
                                     'has_linkedin_link' => (bool) ($parsed['social_signals']['instagram']['has_linkedin_link'] ?? false),
+                                ],
+                                'facebook' => [
+                                    'url' => $parsed['social_signals']['facebook']['url'] ?? null,
+                                ],
+                                'tiktok' => [
+                                    'url' => $parsed['social_signals']['tiktok']['url'] ?? null,
                                 ],
                             ],
                             'extracted_conflicts' => is_array($parsed['extracted_conflicts'] ?? null) 
@@ -528,26 +534,19 @@ CRITICAL DIRECTIVES:
 
 JSON SCHEMA EXPECTED:
 {
+  "alasan_analisis": "<string: Jelaskan alasan pemilihan data, sumber URL yang dipercaya, dan alasan penolakan jika ada konflik>",
   "extracted_data": {
-    "company": "<primary_ext_match_or_null>",
-    "position": "<primary_ext_match_or_null>",
+    "company": "<string_or_null>",
+    "position": "<string_or_null>",
+    "linkedin_url": "<string_or_null>",
     "is_umm_alumni": "true|false|unknown"
   },
   "social_signals": {
-    "instagram": {
-       "url": "<url_or_null>",
-       "has_company_mention": true|false,
-       "has_linkedin_link": true|false
-    }
+    "instagram": { "url": "<url_or_null>" },
+    "facebook": { "url": "<url_or_null>" },
+    "tiktok": { "url": "<url_or_null>" }
   },
-  "extracted_conflicts": [
-     {
-        "field": "company",
-        "value": "<conflicting_value>",
-        "source_url": "<source_of_conflict>"
-     }
-  ],
-  "alasan_analisis": "<string: Berikan penjelasan naratif dalam bahasa Indonesia yang mudah dipahami manusia mengenai mengapa Anda memilih pekerjaan ini, mengaitkan bukti, dan alasan penolakan data lain jika ada konflik>"
+  "extracted_conflicts": []
 }
 PROMPT;
     }

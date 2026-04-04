@@ -340,14 +340,7 @@ class TrackingService
             $this->updateProgress($alumni->nim, 75, "Fase B: Penemuan media sosial berbasis identitas...");
 
             // Extract LinkedIn URL from resolved/extracted data
-            $linkedinUrl = $resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null;
-
-            // Post-validation: LinkedIn URL format
-            if (!empty($linkedinUrl)) {
-                if (!preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $linkedinUrl)) {
-                    $linkedinUrl = null;
-                }
-            }
+            $linkedinUrl = $this->cleanProfileUrl($resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null, 'linkedin');
 
             $linkedinUsername = null;
             if (!empty($linkedinUrl)) {
@@ -445,11 +438,10 @@ class TrackingService
         // STEP 12: Coverage Details + Coverage Tier (NEW)
         // V7.2 §E coverage_detail
         // ============================================================
-        $linkedinUrl = $resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null;
-        // Post-validation: LinkedIn URL format
-        if (!empty($linkedinUrl) && !preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/.*$#', $linkedinUrl)) {
-            $linkedinUrl = null;
-        }
+        $linkedinUrl = $this->cleanProfileUrl($resolvedData['linkedin_url'] ?? $extractedData['linkedin_url'] ?? null, 'linkedin');
+        $sosmedAlumni['ig_url'] = $this->cleanProfileUrl($sosmedAlumni['ig_url'] ?? null, 'instagram');
+        $sosmedAlumni['fb_url'] = $this->cleanProfileUrl($sosmedAlumni['fb_url'] ?? null, 'facebook');
+        $sosmedAlumni['tiktok_url'] = $this->cleanProfileUrl($sosmedAlumni['tiktok_url'] ?? null, 'tiktok');
 
         $coverageDetails = [
             'linkedin'  => !empty($linkedinUrl),
@@ -558,7 +550,7 @@ class TrackingService
                 'sosmed_instansi_fb'       => $sosmedInstansi['fb'],
                 'sosmed_instansi_tiktok'   => $sosmedInstansi['tiktok'],
                 'confidence_score'    => $confidence,
-                'ai_notes'            => $geminiResult['alasan_analisis'] ?? "V7.2 Pipeline | Identity: {$gateStatus} ({$identityConfidence}) | Coverage: {$coverageTier} ({$fieldsCovered}/5) | Penalty: {$conflictPenalty}",
+                'ai_notes'            => $geminiResult['alasan_analisis'] ?? 'Tidak ada catatan analisis.',
                 'source_type'         => 'serper_gemini',
                 // V7.2 new fields
                 'identity_confidence' => $identityConfidence,
@@ -764,9 +756,12 @@ class TrackingService
     {
         $text = strtolower($snippetText);
         $url = strtolower($url);
-        $nameParts = explode(' ', strtolower($alumniData['nama_lengkap']));
 
-        // RULE 1: Name Check (At least one significant part of the name must exist)
+        // Rule 1: Allow LinkedIn unconditionally (due to snippet truncation)
+        if (str_contains($url, 'linkedin.com/in/')) return true;
+
+        // Rule 2: Name must exist
+        $nameParts = explode(' ', strtolower($alumniData['nama_lengkap']));
         $nameMatch = false;
         foreach ($nameParts as $part) {
             if (strlen($part) > 2 && str_contains($text, $part)) {
@@ -776,18 +771,21 @@ class TrackingService
         }
         if (!$nameMatch) return false;
 
-        // RULE 2: Platform Bypass (The LinkedIn Exception)
-        // Education is often truncated in Google snippets. If it's a LinkedIn profile AND the name matches, let it through to Gemini.
-        if (str_contains($url, 'linkedin.com/in/')) {
-            return true;
-        }
+        // Rule 3: Strict Context for General Web & Other Social Media
+        return preg_match('/\bumm\b/', $text) || (str_contains($text, 'muhammadiyah') && str_contains($text, 'malang')) || str_contains($text, strtolower($alumniData['prodi']));
+    }
 
-        // RULE 3: Strict Context for General Web & Other Social Media
-        $hasUmm = preg_match('/\bumm\b/', $text);
-        $hasMuhMalang = str_contains($text, 'muhammadiyah') && str_contains($text, 'malang');
-        $hasProdi = str_contains($text, strtolower($alumniData['prodi']));
-
-        return $hasUmm || $hasMuhMalang || $hasProdi;
+    private function cleanProfileUrl(?string $url, string $platform): ?string {
+        if (empty($url)) return null;
+        $url = strtok($url, '?'); // Remove query params
+        
+        return match($platform) {
+            'linkedin' => preg_match('#^https?://([a-z]{2,3}\.)?linkedin\.com/in/[^/]+/?$#i', $url) ? $url : null,
+            'instagram' => preg_match('#^https?://(www\.)?instagram\.com/(?!p/|reel/|explore/)[^/]+/?$#i', $url) ? $url : null,
+            'facebook' => preg_match('#^https?://(www\.)?facebook\.com/(?!story\.php|photo\.php|groups/)[^/]+/?$#i', $url) ? $url : null,
+            'tiktok' => preg_match('#^https?://(www\.)?tiktok\.com/@[^/]+/?$#i', $url) ? $url : null,
+            default => $url
+        };
     }
 
     /**
