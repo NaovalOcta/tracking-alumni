@@ -36,6 +36,10 @@ class BatchTrackingJob implements ShouldQueue
 
     public function handle(): void
     {
+        Log::warning('Batch tracking disabled to protect API limits during Exhaustive Search mode.');
+        return;
+
+        // Original logic below (disabled for V7.2 safety)
         $query = Alumni::query();
 
         if ($this->status) {

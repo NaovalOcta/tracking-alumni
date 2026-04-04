@@ -89,107 +89,82 @@ class TrackingService
             'ignored_signals'  => [],
         ];
 
-        $maxRetries = 2;
-        $currentRetry = 0;
+        $this->updateProgress($alumni->nim, 15, "Menyiapkan 12 query OSINT kombinatorial...");
+
+        // ============================================================
+        // STEP 2: Generate Exhaustive Queries (V7.2 NEW)
+        // ============================================================
+        $queries = $this->queryGenerator->generateExhaustiveQueries($alumni);
+
+        // ============================================================
+        // STEP 3: Query Deduplication via FetchCacheService
+        // ============================================================
+        $filteredQueries = [];
+        foreach ($queries as $queryInfo) {
+            $qStr = $queryInfo['query'];
+            if ($this->fetchCache->isQueryDuplicate($qStr)) {
+                Log::info("TrackingService: Query deduplicated (already run today): {$qStr}");
+                $decisionTrace['ignored_signals'][] = "Query deduplicated: '{$qStr}' (same-day duplicate)";
+                continue;
+            }
+            $filteredQueries[] = $queryInfo;
+        }
+
+        if (empty($filteredQueries)) {
+            Log::info("TrackingService: All 12 exhaustive queries deduplicated. Likely already tracked today.");
+            // However, we proceed to check if there's any existing evidence or let it fail gracefully
+        }
+
+        $queryStrings = array_column($filteredQueries, 'query');
+        $this->updateProgress($alumni->nim, 30, "Mengeksekusi 12 query paralel (3 batch)...");
+
+        // ============================================================
+        // STEP 4: Serper Search + URL Caching (Exhaustive)
+        // ============================================================
+        $concurrentResults = $this->serperSearch->searchConcurrent($queryStrings, 5); // Increased max results to 5 for exhaustive search
+
+        // ============================================================
+        // STEP 5: Evidence Aggregation & Snippet Deduplication
+        // ============================================================
         $allEvidenceFinal = [];
-        $queryStringsExecuted = [];
+        $uniqueSnippets = [];
 
-        while ($currentRetry <= $maxRetries) {
-            $this->updateProgress($alumni->nim, 10 + ($currentRetry * 5), "Merumuskan strategi pencarian (Percobaan {$currentRetry})...");
+        foreach ($queries as $queryInfo) {
+            $qStr = $queryInfo['query'];
+            $searchResults = $concurrentResults[$qStr] ?? ['items' => [], 'totalResults' => 0];
 
-            // ============================================================
-            // STEP 2: Generate queries via QueryGeneratorService (EXISTING — PRESERVED)
-            // ============================================================
-            try {
-                $strategy = $this->queryGenerator->generate($alumni);
-                $queries = $strategy['queries'] ?? [];
-            } catch (\Exception $e) {
-                Log::error("TrackingService: Strategy generation failed: " . $e->getMessage());
-                $queries = [];
-            }
+            // Record execution in DB
+            SearchQuery::create([
+                'alumni_nim'    => $alumni->nim,
+                'query_text'    => $qStr,
+                'search_tier'   => $queryInfo['tier'],
+                'results_count' => $searchResults['totalResults'],
+                'searched_at'   => now(),
+            ]);
 
-            // Mutation logic for retries: broaden queries (EXISTING — PRESERVED)
-            if ($currentRetry > 0) {
-                foreach ($queries as &$q) {
-                    $q['query'] = str_replace("\"{$alumni->prodi}\"", "", $q['query']);
-                    $q['query'] = str_replace(strtolower($alumni->prodi), "", strtolower($q['query']));
+            foreach ($searchResults['items'] as $item) {
+                // Deduplicate by URL AND by snippet (to save Gemini tokens)
+                $snippetHash = md5($item['snippet'] . $item['title']);
+                
+                if (!collect($allEvidenceFinal)->contains('source_url', $item['link']) && !in_array($snippetHash, $uniqueSnippets)) {
+                    $allEvidenceFinal[] = [
+                        'source_url'  => $item['link'],
+                        'raw_snippet' => $item['snippet'] . ' - ' . $item['title'],
+                        'source_type' => $this->mapTierToSourceType($queryInfo['tier'], $item['link']),
+                    ];
+                    $uniqueSnippets[] = $snippetHash;
                 }
             }
-
-            if (empty($queries)) {
-                break;
-            }
-
-            // ============================================================
-            // STEP 3: Query Deduplication via FetchCacheService (NEW)
-            // ============================================================
-            $filteredQueries = [];
-            foreach ($queries as $queryInfo) {
-                $qStr = $queryInfo['query'];
-                if ($this->fetchCache->isQueryDuplicate($qStr)) {
-                    Log::info("TrackingService: Query deduplicated (already run today): {$qStr}");
-                    $decisionTrace['ignored_signals'][] = "Query deduplicated: '{$qStr}' (same-day duplicate)";
-                    continue;
-                }
-                $filteredQueries[] = $queryInfo;
-            }
-
-            if (empty($filteredQueries)) {
-                Log::info("TrackingService: All queries deduplicated. Skipping search.");
-                $currentRetry++;
-                continue;
-            }
-
-            $queryStrings = array_unique(array_column($filteredQueries, 'query'));
-            $this->updateProgress($alumni->nim, 30, "Mengeksekusi " . count($queryStrings) . " query paralel...");
-
-            // ============================================================
-            // STEP 4: Serper Search + URL Caching (MODIFIED — caching handled inside SerperSearchService)
-            // ============================================================
-            $concurrentResults = $this->serperSearch->searchConcurrent($queryStrings, 3);
-
-            // ============================================================
-            // STEP 5: URL Deduplication (EXISTING — PRESERVED)
-            // ============================================================
-            $allEvidence = [];
-            foreach ($filteredQueries as $queryInfo) {
-                $qStr = $queryInfo['query'];
-                $searchResults = $concurrentResults[$qStr] ?? ['items' => [], 'totalResults' => 0];
-
-                SearchQuery::create([
-                    'alumni_nim'    => $alumni->nim,
-                    'query_text'    => $qStr,
-                    'search_tier'   => $queryInfo['tier'],
-                    'results_count' => $searchResults['totalResults'],
-                    'searched_at'   => now(),
-                ]);
-
-                foreach ($searchResults['items'] as $item) {
-                    // Deduplicate URLs
-                    if (!collect($allEvidence)->contains('source_url', $item['link'])) {
-                        $allEvidence[] = [
-                            'source_url'  => $item['link'],
-                            'raw_snippet' => $item['snippet'] . ' - ' . $item['title'],
-                            'source_type' => $this->mapTierToSourceType($queryInfo['tier'], $item['link']),
-                        ];
-                    }
-                }
-            }
-
-            if (empty($allEvidence)) {
-                $currentRetry++;
-                continue;
-            }
-
-            $allEvidenceFinal = $allEvidence;
-            break; // Evidence found, exit retry loop
         }
 
-        // No evidence found after retries
+        // No evidence found
         if (empty($allEvidenceFinal)) {
+            Log::warning("TrackingService: Exhaustive search found 0 evidence for {$alumni->nim}");
             $alumni->update(['tracking_status' => 'not_found', 'last_tracked_at' => now()]);
-            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence di web.'];
+            return ['status' => 'not_found', 'message' => 'Tidak ditemukan evidence di web setelah pencarian mendalam.'];
         }
+
+        Log::info("TrackingService: Exhaustive search completed for {$alumni->nim}. Total unique evidence: " . count($allEvidenceFinal));
 
         // ============================================================
         // STEP 6: Identity Gate (NEW — IdentityValidator)

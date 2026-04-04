@@ -104,45 +104,55 @@ class SerperSearchService
             return [];
         }
 
+        $results = [];
+        $chunks = array_chunk($queries, 4);
+
         try {
-            $this->tryHitRateLimit(count($queries));
+            foreach ($chunks as $index => $chunk) {
+                // Rate limit check for each chunk
+                $this->tryHitRateLimit(count($chunk));
 
-            $responses = Http::pool(function (Pool $pool) use ($queries, $maxResults) {
-                foreach ($queries as $query) {
-                    $pool->as($query)->timeout(25)
-                        ->withHeaders([
-                            'X-API-KEY'    => $this->apiKey,
-                            'Content-Type' => 'application/json',
-                        ])
-                        ->post('https://google.serper.dev/search', [
-                            'q'   => $query,
-                            'num' => min($maxResults, 10),
-                        ]);
-                }
-            });
+                $responses = Http::pool(function (Pool $pool) use ($chunk, $maxResults) {
+                    foreach ($chunk as $query) {
+                        $pool->as($query)->timeout(25)
+                            ->withHeaders([
+                                'X-API-KEY'    => $this->apiKey,
+                                'Content-Type' => 'application/json',
+                            ])
+                            ->post('https://google.serper.dev/search', [
+                                'q'   => $query,
+                                'num' => min($maxResults, 10),
+                            ]);
+                    }
+                });
 
-            $results = [];
-            foreach ($responses as $query => $response) {
-                if ($response instanceof \Illuminate\Http\Client\Response && $response->successful()) {
-                    $data = $response->json();
-                    $items = collect($data['organic'] ?? [])->map(function ($item) {
-                        return [
-                            'title'   => $item['title'] ?? '',
-                            'link'    => $item['link'] ?? '',
-                            'snippet' => $item['snippet'] ?? '',
+                foreach ($responses as $query => $response) {
+                    if ($response instanceof \Illuminate\Http\Client\Response && $response->successful()) {
+                        $data = $response->json();
+                        $items = collect($data['organic'] ?? [])->map(function ($item) {
+                            return [
+                                'title'   => $item['title'] ?? '',
+                                'link'    => $item['link'] ?? '',
+                                'snippet' => $item['snippet'] ?? '',
+                            ];
+                        })->toArray();
+                        $results[$query] = [
+                            'items' => $items,
+                            'totalResults' => (int) ($data['searchParameters']['totalResults'] ?? count($items)),
                         ];
-                    })->toArray();
-                    $results[$query] = [
-                        'items' => $items,
-                        'totalResults' => (int) ($data['searchParameters']['totalResults'] ?? count($items)),
-                    ];
-                } else {
-                    $errorMsg = $response instanceof \Exception ? $response->getMessage() : $response->body();
-                    Log::error("SerperSearchService: API error for concurrent query", [
-                        'query' => $query,
-                        'error' => $errorMsg
-                    ]);
-                    $results[$query] = ['items' => [], 'totalResults' => 0];
+                    } else {
+                        $errorMsg = $response instanceof \Exception ? $response->getMessage() : $response->body();
+                        Log::error("SerperSearchService: API error for concurrent query", [
+                            'query' => $query,
+                            'error' => $errorMsg
+                        ]);
+                        $results[$query] = ['items' => [], 'totalResults' => 0];
+                    }
+                }
+
+                // If not the last chunk, sleep to prevent 429
+                if ($index < count($chunks) - 1) {
+                    sleep(1);
                 }
             }
 

@@ -139,4 +139,47 @@ class QueryGeneratorService
         // Limit to 3 parallel requests max to save API limits
         return array_slice($queries, 0, 3);
     }
+    /**
+     * Generate 12 unique queries for the Exhaustive OSINT Search.
+     * Matrix: 3 Keywords x 4Platforms.
+     */
+    public function generateExhaustiveQueries(Alumni $alumni): array
+    {
+        $name = $alumni->nama_lengkap;
+        // Clean special chars for better query performance
+        $cleanName = preg_replace('/[^A-Za-z0-9 ]/', '', $name);
+        $prodi = $alumni->prodi;
+
+        $keywordVariants = [
+            "\"{$name}\" \"UMM\" OR \"Universitas Muhammadiyah Malang\"",
+            "\"{$name}\"",
+            "\"{$cleanName}\" \"{$prodi}\" \"Malang\"",
+        ];
+
+        $platformConstraints = [
+            "site:linkedin.com/in",
+            "site:instagram.com",
+            "site:facebook.com",
+            "", // general web
+        ];
+
+        $exhaustiveQueries = [];
+        foreach ($keywordVariants as $kw) {
+            foreach ($platformConstraints as $plt) {
+                $qStr = trim("{$kw} {$plt}");
+                
+                // Map platform to tier for database consistency
+                $tier = 'tier4_web';
+                if (str_contains($plt, 'linkedin')) $tier = 'tier1_linkedin';
+                elseif (str_contains($plt, 'instagram') || str_contains($plt, 'facebook')) $tier = 'tier2_ig_tiktok';
+
+                $exhaustiveQueries[] = [
+                    'query' => $qStr,
+                    'tier'  => $tier,
+                ];
+            }
+        }
+
+        return $exhaustiveQueries;
+    }
 }

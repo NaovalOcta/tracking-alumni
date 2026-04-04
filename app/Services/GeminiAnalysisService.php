@@ -515,12 +515,14 @@ TARGET ALUMNI PROFILE:
 
 WEB EVIDENCES:
 {$evidenceText}
+WARNING: You are receiving an exhaustive scrape of up to 40 search snippets. Most are NOISE or profile clones. Focus strictly on snippets containing exact name matches AND Muhammadiyah Malang/UMM. Rely on your `extracted_conflicts` schema if snippets provide conflicting jobs. Do NOT hallucinate jobs from noise.
+
 You are a Zero-Tolerance Data Extraction Tool. Follow Evidence Hierarchies. Do NOT infer or complete fields.
 
 CRITICAL DIRECTIVES:
 1. Identify all companies mentioned across snippets. List them exactly as written.
 2. Provide explicit signal extraction for social media. If analyzing an IG/TikTok snippet, search specifically for Company Names or LinkedIn URLs within that snippet's text.
-3. If conflicts exist between snippets (e.g. Snippet 1 says "Shopee", Snippet 2 says "Tokopedia"), output BOTH with their respective source URLs into the array "extracted_conflicts".
+3. If conflicts exist between snippets (e.g. Snippet X says "Shopee", Snippet Y says "Tokopedia"), output BOTH with their respective source URLs into the array "extracted_conflicts" for the Conflict Resolution Engine to handle.
 
 JSON SCHEMA EXPECTED:
 {
